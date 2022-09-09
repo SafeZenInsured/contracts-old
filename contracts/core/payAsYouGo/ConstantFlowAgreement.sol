@@ -5,6 +5,8 @@ import "./../../dependencies/openzeppelin/Context.sol";
 import "./../../../interfaces/IERC20.sol";
 import "./../../../interfaces/IERC20Extended.sol";
 
+/// Report any bug or issues at:
+/// @custom:security-contact anshik@safezen.finance
 contract ConstantFlowAgreement is Context{
     uint256 public _protocolCount;
     IERC20 private DAI;
@@ -15,6 +17,10 @@ contract ConstantFlowAgreement is Context{
         sztDAI = IERC20Extended(_sztDAIAddress);
     }
 
+    /// @dev collects user information for each protocol ID
+    /// @param flowRate: amount to be charged per second
+    /// @param flowStartTime: insurance activation time for each protocol ID
+    /// @param isRunning: checks whether user is having active insurance or not
     struct StreamTransaction {
         uint256 flowRate;
         uint256 flowStartTime;
@@ -22,6 +28,7 @@ contract ConstantFlowAgreement is Context{
         bool isRunning;
     }
     
+    // userAddress -> protocolID -> StreamTransactionInfo
     mapping(address => mapping(uint256 => StreamTransaction)) public userStreamTransactionInfo;
 
     struct UserStreamInfo {
@@ -32,6 +39,11 @@ contract ConstantFlowAgreement is Context{
 
     uint256 minimumStreamPeriod = 60; // one hour
     uint256 maxInsuredDays = 90 days;
+
+    function getUserExpectedRunOutTimeInfo(address _userAddress, uint256 _protocolID) external view returns(uint256) {
+        return userStreamTransactionInfo[_userAddress][_protocolID].expectedRunOutTime;
+    }
+
     // protocolID like AAVE which a user want cover against
     error WrongProtocolIDEntered();
     error NotEvenOneHourStreamAmount();
@@ -46,7 +58,8 @@ contract ConstantFlowAgreement is Context{
         if ((streamInfo.userStreamRate * minimumStreamPeriod) > userBalance) {
             revert NotEvenOneHourStreamAmount();
         }
-        streamInfo.expectedStreamEndTime = (userBalance / streamInfo.userStreamRate) > maxInsuredDays ? maxInsuredDays : (userBalance / streamInfo.userStreamRate);
+        // adding 60 minutes buffer if the user do subscribe for less than 90 days
+        streamInfo.expectedStreamEndTime = (userBalance / streamInfo.userStreamRate) > maxInsuredDays ? maxInsuredDays : ((userBalance / streamInfo.userStreamRate) - 60);
         uint256[] memory activeID = findActiveFlows(_protocolCount);
         for (uint256 i=0; i < activeID.length; i++){
             StreamTransaction memory activeStreamInfo = userStreamTransactionInfo[_msgSender()][activeID[i]];
@@ -100,7 +113,7 @@ contract ConstantFlowAgreement is Context{
             balanceToBePaid += (activeStreamInfo.flowRate * duration);
         }
         return balanceToBePaid;
-    }  
+    } 
 
     error TransactionFailed();
     error NoStreamRunningError();
@@ -122,8 +135,13 @@ contract ConstantFlowAgreement is Context{
         }
     }
 
-    function updateEndTime() internal {
-
+    function updateEndTime(address from) internal {
+        uint256[] memory activeID = findActiveFlows(_protocolCount);
+        uint256 expectedRunOutTime = (sztDAI.balanceOf(from) / userStreamDetails[from].userStreamRate);
+        for (uint256 i=0; i< activeID.length; i++){
+            userStreamTransactionInfo[from][activeID[i]].expectedRunOutTime = expectedRunOutTime; 
+            
+        }
     }
 
     error LowUserBalance();
@@ -132,11 +150,7 @@ contract ConstantFlowAgreement is Context{
         uint256 userBalance = sztDAI.balanceOf(from); 
         if ((amountToBePaid + amount) > userBalance) {
             bool success = sztDAI.transferFrom(from, to, amount);
-            uint256[] memory activeID = findActiveFlows(_protocolCount);
-            uint256 expectedRunOutTime = (sztDAI.balanceOf(from) / userStreamDetails[from].userStreamRate);
-            for (uint256 i=0; i< activeID.length; i++){
-                userStreamTransactionInfo[from][activeID[i]].expectedRunOutTime = expectedRunOutTime; // TODO: update time, wrong time
-            }
+            updateEndTime(from);
             return success;
         }
         return false;

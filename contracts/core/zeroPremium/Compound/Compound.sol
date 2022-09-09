@@ -9,6 +9,8 @@ import "./../../../../interfaces/IERC20.sol";
 import "./../ZPController.sol";
 import "./../ZPAccountManager.sol";
 
+/// Report any bug or issues at:
+/// @custom:security-contact anshik@safezen.finance
 contract CompoundPool is Ownable, ICompoundImplementation {
     ZPController zpController;
     
@@ -32,7 +34,7 @@ contract CompoundPool is Ownable, ICompoundImplementation {
         if (_amount < 1e10) {
             revert LowSupplyAmountError();
         }
-        // IErc20(_tokenAddress).transferFrom(_msgSender(), address(this), _amount);
+        IErc20(_tokenAddress).transferFrom(_msgSender(), address(this), _amount);
         // NOTE: Compound Fake ERC20 token doesn't support transferFrom functionality [Real one will support ]
         uint256 currVersion =  zpController.latestVersion();
         uint256 balanceBeforeSupply = ICErc20(_rewardTokenAddress).balanceOf(address(this));
@@ -53,6 +55,7 @@ contract CompoundPool is Ownable, ICompoundImplementation {
             rewardToken.redeem(_amount);
             uint256 balanceAfterRedeem = IErc20(_tokenAddress).balanceOf(address(this));
             uint256 amountToBePaid = (balanceAfterRedeem - balanceBeforeRedeem);
+            // IErc20(_tokenAddress).transferFrom(address(this), _msgSender(), amountToBePaid);
             // IErc20 transfer doesn't work for Compound
             userWithdrawnBalance[_msgSender()][_rewardTokenAddress] += _amount;
             return true;

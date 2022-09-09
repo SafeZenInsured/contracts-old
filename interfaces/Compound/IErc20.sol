@@ -7,6 +7,8 @@ interface IErc20 {
     function approve(address, uint256) external returns (bool);
 
     function transfer(address to, uint256 amount) external returns (bool);
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool);
     
     function balanceOf(address account) external returns (uint256);
 }

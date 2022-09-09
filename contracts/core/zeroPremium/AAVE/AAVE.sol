@@ -7,6 +7,8 @@ import "./../../../../interfaces/AAVE/IAAVEImplementation.sol";
 import "./../../../dependencies/openzeppelin/Ownable.sol"; // accessable by admin
 import "./../ZPController.sol";
 
+/// Report any bug or issues at:
+/// @custom:security-contact anshik@safezen.finance
 contract AAVE is Ownable, IAAVEImplementation {
     IAAVE LendAAVE;
     ZPController zpController;

@@ -5,6 +5,8 @@ import "./../../dependencies/openzeppelin/ERC20.sol";
 import "./../../../interfaces/IERC20Extended.sol";
 import "./../../dependencies/openzeppelin/Ownable.sol";
 
+/// Report any bug or issues at:
+/// @custom:security-contact anshik@safezen.finance
 contract sztDAI is ERC20, IERC20Extended {
 
     constructor(address _constantFlowCA) 

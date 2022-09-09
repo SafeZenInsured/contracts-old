@@ -1,5 +1,5 @@
 import time
-from brownie import accounts, BuySellSZT, SZTERC20, DemoStableCoin, GSZT
+from brownie import accounts, BuySellSZT, SZT, FakeCoin, GSZT
 
 # brownie run scripts/BuySellSZTScript.py --network development
 # brownie console --network development
@@ -10,16 +10,17 @@ few things that are yet to be considered: aka TODO task:
 
 """
 accountA = accounts.add("0797b4c6d28170e148ca24a4d8d8547600deb6bb7a07ce8f591a7713ba38a0ef") # old accountA
-accountB = accounts.add("bed7ccf7bc6d24b639ae1e77e636320474100b6c898834a0da5fe8e3876245ce") # new accountA
+accountA = accounts.add("bed7ccf7bc6d24b639ae1e77e636320474100b6c898834a0da5fe8e3876245ce") # new accountA
 
 def main():
     # Deploying the contracts
-    DAIContract = DemoStableCoin.deploy("DAI", "DAI", {"from": accountA})
-    BuySellContract = BuySellSZT.deploy(1, 4, DAIContract.address, {"from":accountA})
+    BuySellContract = BuySellSZT.deploy(1, 4, {"from":accountA})
+    DAIContract = FakeCoin.deploy("DAI", "DAI", BuySellContract.address, {"from": accountA})
     GSZTContract = GSZT.deploy(BuySellContract.address, {"from":accountA})
-    SZTContract = SZTERC20.deploy(BuySellContract.address, {"from":accountA})
+    SZTContract = SZT.deploy(BuySellContract.address, {"from":accountA})
 
     # Initializing contract addresses
+    BuySellContract.setDAITokenCA(DAIContract.address, {"from":accountA})
     tx1 = BuySellContract.setSafeZenTokenCA(SZTContract.address, {"from":accountA})
     tx2 = BuySellContract.setSafeZenGovernanceTokenCA(GSZTContract.address, {"from":accountA})
 

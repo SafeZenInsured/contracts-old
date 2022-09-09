@@ -4,6 +4,8 @@ pragma solidity ^0.8.0;
 import "./../../dependencies/openzeppelin/ERC20.sol";
 import "./../../../interfaces/IERC20Extended.sol";
 
+/// Report any bug or issues at:
+/// @custom:security-contact anshik@safezen.finance
 contract GSZT is ERC20, IERC20Extended {
 
     constructor(address _buySZTCA) 

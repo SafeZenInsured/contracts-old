@@ -6,40 +6,56 @@ import "./../../../interfaces/IERC20Extended.sol";
 import "./../../../interfaces/IBuySellSZT.sol";
 import "./../../dependencies/openzeppelin/Ownable.sol";
 
-// Report any bug or issues at:
+/// Report any bug or issues at:
 /// @custom:security-contact anshik@safezen.finance
 contract BuySellSZT is Ownable, IBuySellSZT{
-    uint public SZTBasePrice = 100;  // SZT token base price
+    uint256 public constant SZTBasePrice = 100;  // SZT token base price
     uint256 public tokenCounter = 0;  // SZT tokens in circulation
-    uint256 private _SZTBasePriceWithDecimals = 100 * 1e18; // SZT token base price with decimals
+    uint256 private constant _SZTBasePriceWithDecimals = 100 * 1e18; // SZT token base price with decimals
     uint256 private immutable _commonRatio;  // common ratio for SZT YUVAA calculations
     IERC20 private SafeZenToken; // native SZT token
     IERC20Extended private SafeZenGovernanceToken; // native GSZT token
     IERC20 private DAI; // DAI address
 
-    // Waiting Period
+    /// @dev adds the sell timer, allowing user to sell only after the specified time period
+    /// @param ifTimerStarted: checks if the sell timer has started
+    /// @param SZTTokenCount: record the number of tokens user wishes to sell
+    /// @param canWithdrawTime: record the time when user can sell their tokens to BuySell Contract
     struct sellWaitPeriod{
         bool ifTimerStarted;
         uint256 SZTTokenCount;
         uint256 canWithdrawTime;
     }
 
+    /// @dev record the user penalty [governance, if they try to cheat in the claim and governance decisions]
     mapping (address => uint256) private userSZTPenalty; 
+    /// @dev map each user address with the sellWaitPeriod struct
     mapping (address => sellWaitPeriod) private checkWaitTime;
     
-    constructor(uint value, uint decimals, address _tokenAddress) {
+    /// @dev non-changable commonRatio, needed for non-speculation part of our SZT tokens
+    constructor(uint value, uint decimals) {
         _commonRatio = (value * 10e17) / (10 ** decimals);
-        DAI = IERC20(_tokenAddress);
+        
     }
 
+    /// NOTE only needed for testnet, then we can set IERC20(DAI) in the constructor itself
+    function setDAITokenCA(address _DAITokenCA) external onlyOwner {
+        DAI = IERC20(_DAITokenCA);
+    }
+
+    /// @dev to set the address of our SZT token
+    /// @param _safeZenTokenCA: address of the SZT token
     function setSafeZenTokenCA(address _safeZenTokenCA) external onlyOwner {
         SafeZenToken = IERC20(_safeZenTokenCA);
     }
 
+    /// @dev to set the address of our GSZT token
+    /// @param _SafeZenGovernanceTokenCA: address of the GSZT token
     function setSafeZenGovernanceTokenCA(address _SafeZenGovernanceTokenCA) external onlyOwner {
         SafeZenGovernanceToken = IERC20Extended(_SafeZenGovernanceTokenCA);
     }
 
+    
     function viewSZTCurrentPrice() view external override returns(uint) {
         uint256 SZTCommonRatio = (_commonRatio * SZTBasePrice * tokenCounter)/1e18;
         uint256 amountPerToken = (SZTBasePrice * (1e18)) + SZTCommonRatio;
@@ -121,7 +137,7 @@ contract BuySellSZT is Ownable, IBuySellSZT{
         mintGSZT(_to);
 
         if (_from != address(this)) {
-            burnGSZTToken(_from);
+            SafeZenGovernanceToken.burnFrom(_from, burnGSZTToken(_from));
         }
 
         if (!success) {
