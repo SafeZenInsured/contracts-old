@@ -15,7 +15,7 @@ contract BuySellSZT is Ownable, IBuySellSZT{
     uint256 private immutable _commonRatio;  // common ratio for SZT YUVAA calculations
     IERC20 private SafeZenToken; // native SZT token
     IERC20Extended private SafeZenGovernanceToken; // native GSZT token
-    IERC20 private DAI; // DAI address
+    IERC20 private immutable DAI; // DAI address
 
     /// @dev adds the sell timer, allowing user to sell only after the specified time period
     /// @param ifTimerStarted: checks if the sell timer has started
@@ -33,14 +33,9 @@ contract BuySellSZT is Ownable, IBuySellSZT{
     mapping (address => sellWaitPeriod) private checkWaitTime;
     
     /// @dev non-changable commonRatio, needed for non-speculation part of our SZT tokens
-    constructor(uint value, uint decimals) {
+    constructor(uint value, uint decimals, address _DAITokenCA) {
         _commonRatio = (value * 10e17) / (10 ** decimals);
-        
-    }
-
-    /// NOTE only needed for testnet, then we can set IERC20(DAI) in the constructor itself
-    function setDAITokenCA(address _DAITokenCA) external onlyOwner {
-        DAI = IERC20(_DAITokenCA);
+        DAI = IERC20(_DAITokenCA);   
     }
 
     /// @dev to set the address of our SZT token
@@ -55,13 +50,16 @@ contract BuySellSZT is Ownable, IBuySellSZT{
         SafeZenGovernanceToken = IERC20Extended(_SafeZenGovernanceTokenCA);
     }
 
-    
+    /// @dev check the current SZT token price
     function viewSZTCurrentPrice() view external override returns(uint) {
         uint256 SZTCommonRatio = (_commonRatio * SZTBasePrice * tokenCounter)/1e18;
         uint256 amountPerToken = (SZTBasePrice * (1e18)) + SZTCommonRatio;
         return amountPerToken;
     }
     
+    /// @dev calculate the SZT token value for the asked amount of SZT tokens
+    /// @param issuedSZTTokens: the amount of SZT tokens currently in circulation
+    /// @param requiredTokens: issuedSZTTokens + the amount of SZT tokens required
     function calculateSZTPrice(uint256 issuedSZTTokens, uint256 requiredTokens) view public returns(uint, uint) {
         uint256 SZTCommonRatio = _commonRatio * SZTBasePrice;
         // to avoid check everytime, we prefer to buy first token.
@@ -73,18 +71,26 @@ contract BuySellSZT is Ownable, IBuySellSZT{
         return (amountPerToken, amountToBePaid);
     }
 
-    function calculateGSZTCommonRatio(uint256 issuedSZTTokens, uint256 alpha, uint256 decimals) view internal returns(uint256) {
+    /// @dev calculate the common ratio for the GSZT token calculation
+    /// @param issuedSZTTokens: amount of SZT tokens currently in circulation
+    /// @param alpha: alpha value for the calculation of GSZT token
+    /// @param decimals: to calculate the actual alpha value for GSZT tokens 
+    function calculateGSZTCommonRatio(uint256 issuedSZTTokens, uint256 alpha, uint256 decimals) pure internal returns(uint256) {
         uint256 GSZTcommonRatio = ((alpha * 1e18) / (10 ** decimals));
         uint256 tokenValue = (GSZTcommonRatio * SZTBasePrice * issuedSZTTokens) / 1e18;
         uint256 amountPerToken = _SZTBasePriceWithDecimals + tokenValue;
         return amountPerToken;
     }
 
+    /// @dev for assigning the penalty incase user cheats or give false info in our governance or claim processing
+    /// @param penaltyValue: amount of tokens the user will be penalized [based on our whitepaper]
     function demoAddPenalty(uint256 penaltyValue) external onlyOwner {
         userSZTPenalty[_msgSender()] += penaltyValue;
     }
 
-    function calculateGSZTTokenCount(uint256 issuedSZTTokens) internal view returns(uint256) {
+    /// @dev calculating the GSZT token to be awarded to user based on the amount of SZT token user have
+    /// @param issuedSZTTokens: amount of issued SZT tokens to user    
+    function calculateGSZTTokenCount(uint256 issuedSZTTokens) internal pure returns(uint256) {
         uint256 commonRatioA = (SZTBasePrice * 1e36) / calculateGSZTCommonRatio(issuedSZTTokens, 17, 2);
         uint256 commonRatioB = (calculateGSZTCommonRatio(issuedSZTTokens, 22, 6) / (SZTBasePrice)) - (1e18);
         uint256 GSZTTokenCount = ((commonRatioA + commonRatioB) * issuedSZTTokens) / 1e18;
@@ -92,6 +98,8 @@ contract BuySellSZT is Ownable, IBuySellSZT{
     }
     
     error TransactionFailed();
+    /// @dev minting the GSZT tokens to the provided user address
+    /// @param _userAddress: user address
     function mintGSZT(address _userAddress) internal {
         uint256 userSZTBalance = SafeZenToken.balanceOf(_userAddress);
         uint256 userSZTCount = userSZTBalance - userSZTPenalty[_userAddress];
@@ -104,12 +112,18 @@ contract BuySellSZT is Ownable, IBuySellSZT{
         }
     }
 
+    /// @dev minting the tokens to investors based on the price of equivalent SZT token
+    /// NOTE: few withdraw implementations needed to be made
+    /// @param _investorAddress: wallet address of the investors (can be a Gnosis Safe account)
+    /// @param _equivalentSZTTokens: equivalent SZT tokens based on the amount invested
     function mintGSZTForInvestors(address _investorAddress, uint256 _equivalentSZTTokens) external onlyOwner {
         uint256 GSZTToMint = calculateGSZTTokenCount(_equivalentSZTTokens);
         SafeZenGovernanceToken.mint(_investorAddress, GSZTToMint);
     }
 
     error LowAmountError();
+    /// @dev buying our native non-speculative SZT token
+    /// @param _value: amount of SZT tokens user wishes to purchase
     function buySZTToken(uint256 _value) external override returns(bool) {
         (/*uint amountPerToken*/, uint amountToBePaid) = calculateSZTPrice(tokenCounter, (tokenCounter + _value));
         if (DAI.balanceOf(_msgSender()) < amountToBePaid) {
@@ -128,7 +142,10 @@ contract BuySellSZT is Ownable, IBuySellSZT{
 
     error ZeroAddressTransactionError();
     error TransactionFailedError();
-
+    /// @dev transfer function for SZT [and GSZT tokens]
+    /// @param _from: sending user address
+    /// @param _to: receiving user address
+    /// @param _value: amount of SZT tokens user [sending address] wishes to transfer to other user [receiving address]
     function transferSZT(address _from, address _to, uint _value) external returns(bool) {
         if (_from == address(0) || _to == address(0) || _value == 0) {
             revert ZeroAddressTransactionError();
@@ -147,6 +164,8 @@ contract BuySellSZT is Ownable, IBuySellSZT{
         return true;
     }
 
+    /// @dev Burning the GSZT token
+    /// @param _userAddress: wallet address of the user
     function burnGSZTToken(address _userAddress) view internal returns(uint256) {
         uint256 userSZTBalance = SafeZenToken.balanceOf(_userAddress);
         uint256 userSZTCount = userSZTBalance - userSZTPenalty[_userAddress];
@@ -156,6 +175,8 @@ contract BuySellSZT is Ownable, IBuySellSZT{
         return amountToBeBurned;
     }
 
+    /// @dev activating the timer if the user wishes to sell his/her/their tokens [to prevent front running]
+    /// @param _value: the amount of token user wishes to withdraw
     function activateSellTimer(uint256 _value) external override returns(bool) {
         if (
             (!(checkWaitTime[_msgSender()].ifTimerStarted)) || 
@@ -172,6 +193,9 @@ contract BuySellSZT is Ownable, IBuySellSZT{
     }
 
     error LowSZTBalanceError();
+    /// NOTE: TODO: Gelato Integration to be done
+    /// @dev selling the SZT tokens
+    /// @param _value: the amounnt of SZT tokens user wishes to sell
     function sellSZTToken(uint256 _value) external returns(bool) {
         if (SafeZenToken.balanceOf(_msgSender()) < (_value)) {
             revert LowSZTBalanceError();
@@ -197,6 +221,7 @@ contract BuySellSZT is Ownable, IBuySellSZT{
         return false;
     }
 
+    /// @dev to check the common ratio used in the price calculation of SZT token 
     function getCommonRatio() view external returns (uint256) {
         return _commonRatio;
     }

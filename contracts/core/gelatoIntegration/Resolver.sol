@@ -3,20 +3,29 @@ pragma solidity ^0.8.0;
 
 import "./../../dependencies/openzeppelin/Ownable.sol";
 import "./../../../interfaces/IOps.sol";
+import "./../../../interfaces/ICFA.sol";
+import "./../../dependencies/gelato/OpsReady.sol";
 
-interface ICFA {
-
-    function getUserExpectedRunOutTimeInfo(address _userAddress, uint256 _protocolID) external view returns(uint256);
-
-    function closeTokenStream(uint256 protocolID) external;
-}
 
 contract Resolver is Ownable{
     ICFA public immutable _CFA;
+// 
+    // constructor(address payable _ops, address _CFAAddress) OpsReady(_ops) {
+    //     _CFA = ICFA(_CFAAddress);
+    // }
 
     constructor(address _CFAAddress) {
         _CFA = ICFA(_CFAAddress);
     }
+
+    // function startTask() external {
+    //     IOps.createTask(
+    //         address(_CFA), 
+    //         _CFA.closeTokenStream.selector,
+    //         address(this),
+    //         abi.encodeWithSelector(this.checker.selector)
+    //     );
+    // }
 
     error TransactionFailedError();
     function checker(address _userAddress, uint256 _protocolID) external view returns(bool canExec, bytes memory execPayload) {

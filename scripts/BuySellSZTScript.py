@@ -14,13 +14,12 @@ accountA = accounts.add("bed7ccf7bc6d24b639ae1e77e636320474100b6c898834a0da5fe8e
 
 def main():
     # Deploying the contracts
-    BuySellContract = BuySellSZT.deploy(1, 4, {"from":accountA})
-    DAIContract = FakeCoin.deploy("DAI", "DAI", BuySellContract.address, {"from": accountA})
+    DAIContract = FakeCoin.deploy("DAI", "DAI", {"from": accountA})
+    BuySellContract = BuySellSZT.deploy(1, 4, DAIContract.address, {"from":accountA})
     GSZTContract = GSZT.deploy(BuySellContract.address, {"from":accountA})
     SZTContract = SZT.deploy(BuySellContract.address, {"from":accountA})
 
     # Initializing contract addresses
-    BuySellContract.setDAITokenCA(DAIContract.address, {"from":accountA})
     tx1 = BuySellContract.setSafeZenTokenCA(SZTContract.address, {"from":accountA})
     tx2 = BuySellContract.setSafeZenGovernanceTokenCA(GSZTContract.address, {"from":accountA})
 
