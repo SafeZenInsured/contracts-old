@@ -6,13 +6,11 @@ interface ICFA {
 
     function startFlow(uint256 _streamFlowRate, uint256 protocolID) external;
 
-    function mintToken(uint256 _amount) external returns(bool);
+    function findActiveFlows(address userAddress, uint256 protocolCount) external view returns(uint256[] memory);
 
-    function findActiveFlows(uint256 protocolCount) external view returns(uint256[] memory);
+    function calculateTotalFlowMade(address _userAddress) external view returns(uint256);
 
-    function calculateTotalFlowMade() external view returns(uint256);
-
-    function closeTokenStream(uint256 protocolID) external;
+    function closeTokenStream(address userAddress, uint256 protocolID) external;
 
     function transferFrom(address from, address to, uint256 amount) external returns(bool);
 
