@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import "./../../../interfaces/IERC20.sol";
 import "./../../../interfaces/IERC20Extended.sol";
 import "./../../../interfaces/IBuySellSZT.sol";
+import "./../../../interfaces/ISZTStaking.sol";
 import "./../../dependencies/openzeppelin/Ownable.sol";
 
 /// Report any bug or issues at:
@@ -16,6 +17,7 @@ contract BuySellSZT is Ownable, IBuySellSZT{
     IERC20 private SafeZenToken; // native SZT token
     IERC20Extended private SafeZenGovernanceToken; // native GSZT token
     IERC20 private immutable DAI; // DAI address
+    ISZTStaking public SZTStaking; 
 
     /// @dev adds the sell timer, allowing user to sell only after the specified time period
     /// @param ifTimerStarted: checks if the sell timer has started
@@ -42,6 +44,10 @@ contract BuySellSZT is Ownable, IBuySellSZT{
     /// @param _safeZenTokenCA: address of the SZT token
     function setSafeZenTokenCA(address _safeZenTokenCA) external onlyOwner {
         SafeZenToken = IERC20(_safeZenTokenCA);
+    }
+
+    function setSZTStakingCA(address _SZTStakingCA) external onlyOwner {
+        SZTStaking = ISZTStaking(_SZTStakingCA);
     }
 
     /// @dev to set the address of our GSZT token
@@ -146,7 +152,7 @@ contract BuySellSZT is Ownable, IBuySellSZT{
     /// @param _from: sending user address
     /// @param _to: receiving user address
     /// @param _value: amount of SZT tokens user [sending address] wishes to transfer to other user [receiving address]
-    function transferSZT(address _from, address _to, uint _value) external returns(bool) {
+    function transferSZT(address _from, address _to, uint _value) external override returns(bool) {
         if (_from == address(0) || _to == address(0) || _value == 0) {
             revert ZeroAddressTransactionError();
         }
@@ -204,9 +210,10 @@ contract BuySellSZT is Ownable, IBuySellSZT{
             (block.timestamp >= checkWaitTime[_msgSender()].canWithdrawTime) &&
             (_value <= checkWaitTime[_msgSender()].SZTTokenCount)
         ) {
+            uint256 tokenCount = tokenCounter - SZTStaking.totalTokensStaked();
             bool SZTTransferSuccess = SafeZenToken.transferFrom(_msgSender(), address(this), _value);
             bool GSZTBurnSuccess = SafeZenGovernanceToken.burnFrom(_msgSender(), burnGSZTToken(_msgSender()));
-            (/*amountPerToken*/, uint256 amountToBeReleased) = calculateSZTPrice((tokenCounter - _value), tokenCounter);
+            (/*amountPerToken*/, uint256 amountToBeReleased) = calculateSZTPrice((tokenCount - _value), tokenCount);
             bool DAITransferSuccess = DAI.transfer(_msgSender(), amountToBeReleased);
             if ((!DAITransferSuccess) || (!GSZTBurnSuccess) || (!SZTTransferSuccess)) {
                 revert TransactionFailed();

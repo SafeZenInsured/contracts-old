@@ -16,4 +16,6 @@ interface IBuySellSZT {
     function activateSellTimer(uint256 _value) external returns(bool);
 
     function sellSZTToken(uint256 _value) external returns(bool);
+
+    function transferSZT(address _from, address _to, uint _value) external returns(bool);
 }

@@ -62,8 +62,10 @@ contract AAVE is Ownable, IAAVEImplementation {
         for (uint i = 0; i <= currVersion; i++) {
             uint256 userVersionBalance = userTransactionInfo[_msgSender()][_rewardTokenAddress][i];
             if (userVersionBalance > 0) {
-                userBalance += ((userVersionBalance * zpController.versionLiquidationFactor(i)) / 100);
-            }    
+                userBalance = (((userVersionBalance+ userBalance) * zpController.versionLiquidationFactor(i)) / 100);
+            } else {
+                userBalance = ((userBalance * zpController.versionLiquidationFactor(i)) / 100);
+            }   
         }
         userBalance -= userWithdrawnBalance[_msgSender()][_rewardTokenAddress];
         return userBalance;

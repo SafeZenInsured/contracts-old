@@ -43,20 +43,6 @@ contract TerminateInsurance is OpsReady, Ownable, Pausable {
         _CFA.closeTokenStream(_userAddress, _protocolID);
     }
 
-    // function gelatoStopFlow(address _userAddress) external onlyOps whenNotPaused {
-    //     stopCFAFlow(_userAddress);
-    //     (uint256 feeAmount, ) = IOps(ops).getFeeDetails();
-    //     _payTxFee(feeAmount);
-    // }
-
-    // function stopCFAFlow(address _userAddress) internal {
-    //     if (_CFA.getUserStreamRunOutTime(_userAddress) > block.timestamp) {
-    //         revert TransactionFailedError();
-    //     }
-    //     _CFA.closeAllStream(_userAddress);
-    // }
-
-
     function createGelatoProtocolSpecificTask(address _userAddress, uint256 _protocolID) external onlyCFA {
         bytes4 _execSelector = bytes4(
             abi.encodeWithSignature("gelatoSpecificProtocolStopFlow()")
@@ -71,20 +57,6 @@ contract TerminateInsurance is OpsReady, Ownable, Pausable {
         );
     }
 
-    // function createGelatoTask(address _userAddress) external onlyCFA {
-    //     bytes4 _execSelector = bytes4(
-    //         abi.encodeWithSignature("gelatoStopFlow()")
-    //     );
-    //     bytes memory resolverData = abi.encodeWithSignature("gelatoResolver()");
-    //     majorTaskID[_userAddress] = IOps(ops).createTaskNoPrepayment(
-    //         address(this), 
-    //         _execSelector,
-    //         address(this),
-    //         resolverData,
-    //         ETH
-    //     );
-    // }
-
     /// @dev to cancel the gelato task
     function cancelProtocolSpecificGelatoTask(address _userAddress, uint256 _protocolID) external onlyCFA {
         bytes32 _taskID = taskID[_userAddress][_protocolID];
@@ -95,7 +67,6 @@ contract TerminateInsurance is OpsReady, Ownable, Pausable {
         bytes32 _taskID = majorTaskID[_userAddress];
         IOps(ops).cancelTask(_taskID);
     }
-
 
     function gelatoResolver()
         external

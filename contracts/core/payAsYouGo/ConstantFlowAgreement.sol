@@ -91,6 +91,7 @@ contract ConstantFlowAgreement is Ownable, ICFA{
         userInsuranceInfo.startTime = block.timestamp;
         userInsuranceInfo.validTill = userGlobalInsuranceInfo.validTill;
         userInsuranceInfo.isValid = true;
+        protocolRegistry.addCoverageOffered(_protocolID, _insuredAmount);
         terminateInsurance.createGelatoProtocolSpecificTask(_msgSender(), _protocolID);
     }
 

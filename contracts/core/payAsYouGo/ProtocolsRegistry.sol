@@ -8,6 +8,7 @@ contract ProtocolRegistry {
 
     struct ProtocolInfo { 
         string protocolName;
+        address protocolAddress;
         bool isProtocolActive;
         uint256 protocolLiquidity;
         uint256 coverageOffered;
@@ -15,6 +16,16 @@ contract ProtocolRegistry {
         bool isCommunityGoverned;
         uint256 riskPoolCategory;
         uint256 streamFlowRate;
+    }
+
+    function calculateRiskPoolLiquidity(uint256 _riskPoolCategory) external view returns(uint256) {
+        uint riskPoolLiquidity = 0;
+        for (uint i = 0; i <= protocolID; i++) {
+            if (ProtocolInfos[i].riskPoolCategory == _riskPoolCategory) {
+                riskPoolLiquidity += ProtocolInfos[i].protocolLiquidity;
+            }
+        }
+        return riskPoolLiquidity;
     }
 
     mapping (uint256 => ProtocolInfo) public ProtocolInfos;
@@ -40,12 +51,13 @@ contract ProtocolRegistry {
         ProtocolInfos[_protocolID].coverageOffered -= _insuredAmount;
     }
 
-    function addProtocolInfo(string memory _protocolName, uint256 _protocolLiquidity) external {
+    function addProtocolInfo(string memory _protocolName, address _protocolAddress) external {
         protocolID ++;
         ProtocolInfo storage newProtocol = ProtocolInfos[protocolID];
         newProtocol.protocolName = _protocolName;
-        newProtocol.isProtocolActive = true;
-        newProtocol.protocolLiquidity = _protocolLiquidity;
+        newProtocol.protocolAddress = _protocolAddress;
+        newProtocol.isProtocolActive = false;
+        newProtocol.protocolLiquidity = 0;
         newProtocol.coverageOffered = 0;
         newProtocol.riskFactor = 100;
         newProtocol.isCommunityGoverned = false;

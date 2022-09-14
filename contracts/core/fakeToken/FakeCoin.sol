@@ -11,4 +11,9 @@ contract FakeCoin is DummyERC20 {
     {
         _mint(msg.sender, 2205002100000000000 * 1e18);
     }
+
+    function mint(address to, uint256 amount) external returns(bool) {
+        _mint(to, amount);
+        return true;
+    }
 }

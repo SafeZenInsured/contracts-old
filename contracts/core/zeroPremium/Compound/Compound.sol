@@ -7,7 +7,6 @@ import "./../../../../interfaces/Compound/IErc20.sol";
 import "./../../../../interfaces/Compound/ICompoundImplementation.sol";
 import "./../../../../interfaces/IERC20.sol";
 import "./../ZPController.sol";
-import "./../ZPAccountManager.sol";
 
 /// Report any bug or issues at:
 /// @custom:security-contact anshik@safezen.finance
@@ -66,16 +65,18 @@ contract CompoundPool is Ownable, ICompoundImplementation {
     
 
     function calculateUserBalance(address userAddress, address _rewardTokenAddress) public view override returns(uint256) {
-        uint256 currentUserBalance;
+        uint256 userBalance;
         uint256 currVersion =  zpController.latestVersion();
 
         for (uint i = 0; i <= currVersion; i++) {
             uint256 userVersionBalance = userTokenBalance[userAddress][_rewardTokenAddress][i];
             if (userVersionBalance > 0) {
-                currentUserBalance += ((userVersionBalance * zpController.versionLiquidationFactor(i)) / 100);
+                userBalance = (((userVersionBalance+ userBalance) * zpController.versionLiquidationFactor(i)) / 100);
+            } else {
+                userBalance = ((userBalance * zpController.versionLiquidationFactor(i)) / 100);
             }    
         }
-        currentUserBalance -= (userWithdrawnBalance[userAddress][_rewardTokenAddress]);
-        return currentUserBalance;
+        userBalance -= (userWithdrawnBalance[userAddress][_rewardTokenAddress]);
+        return userBalance;
     }
 }
