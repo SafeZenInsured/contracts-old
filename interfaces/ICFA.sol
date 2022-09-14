@@ -4,7 +4,7 @@ pragma solidity ^0.8.0;
 
 interface ICFA {
 
-    function startFlow(uint256 _streamFlowRate, uint256 protocolID) external;
+    function activateInsurance(uint256 _insuredAmount, uint256 _protocolID) external;
 
     function findActiveFlows(address userAddress, uint256 protocolCount) external view returns(uint256[] memory);
 
@@ -14,6 +14,12 @@ interface ICFA {
 
     function transferFrom(address from, address to, uint256 amount) external returns(bool);
 
-    function getUserExpectedRunOutTimeInfo(address _userAddress, uint256 _protocolID) external view returns(uint256);
+    function getUserInsuranceValidTillInfo(address _userAddress, uint256 _protocolID) external view returns(uint256);
+
+    function getUserInsuranceStatus(address _userAddress, uint256 _protocolID) external view returns(bool);
+    
+    function closeAllStream(address _userAddress) external;
+
+    function updateFlow(uint256 _insuredAmount, uint256 _protocolID) external;
 
 }

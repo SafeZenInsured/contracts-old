@@ -5,7 +5,8 @@ import "./../../dependencies/openzeppelin/Context.sol";
 import "./../buySell/BuySellSZT.sol";
 import "./../token/SZTERC20.sol";
 
-/// NOTE: Staking tokens would be used for activities like flash loans to generate rewards for the staked users
+/// NOTE: Staking tokens would be used for activities like flash loans 
+/// to generate rewards for the staked users
 contract SZTStaking is Context{
     uint256 minStakeValue;
     BuySellSZT buySellContract;
