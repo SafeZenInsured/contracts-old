@@ -12,18 +12,39 @@ import "./../ZPController.sol";
 contract AAVE is Ownable, IAAVEImplementation {
     IAAVE LendAAVE;
     ZPController zpController;
-    
-    mapping(address => mapping(address => mapping(uint256 => uint256))) private userTransactionInfo;
-    mapping(address => mapping(address => uint256)) private userWithdrawnBalance;
+    uint256 protocolID;
 
-    constructor(address _lendingAddress) {
-        LendAAVE = IAAVE(_lendingAddress);
+    struct UserInfo {
+        bool isActiveInvested;
+        uint256 startVersionBlock;
+        uint256 withdrawnBalance;
     }
 
-    function updateZeroPremiumController(address _controllerAddress) external onlyOwner {
+    /// User Address => Reward Token Address => Version => UserTransactionInfo
+    mapping(address => mapping(address => mapping(uint256 => uint256))) private userTransactionInfo;
+    mapping(address => mapping(address => UserInfo)) private usersInfo;
+
+    constructor(
+        address _lendingAddress, 
+        address _controllerAddress
+    ) {
+        LendAAVE = IAAVE(_lendingAddress);
         zpController = ZPController(_controllerAddress);
     }
 
+    /// Initialize this function first before running any other function
+    function addAAVEProtocolInfo(
+        string memory _protocolName,
+        address _deployedAddress,
+        bool _isCommunityGoverned,
+        uint256 _riskFactor,
+        uint256 _riskPoolCategory
+    ) external onlyOwner {
+        protocolID = zpController.protocolID();
+        zpController.addCoveredProtocol(_protocolName, _deployedAddress, _isCommunityGoverned, _riskFactor, _riskPoolCategory);
+    } 
+
+    /// for testnet purposes
     function mintERC20Tokens(address tokenAddress, uint256 amount) public override {
         IAAVEERC20(tokenAddress).mint(msg.sender, amount);
     }
@@ -42,6 +63,11 @@ contract AAVE is Ownable, IAAVEImplementation {
         LendAAVE.supply(_tokenAddress, _amount, address(this), 0);
         uint256 balanceAfterSupply = IAAVEERC20(_rewardTokenAddress).balanceOf(address(this));
         userTransactionInfo[_msgSender()][_rewardTokenAddress][currVersion] += (balanceAfterSupply - balanceBeforeSupply);
+        if (!usersInfo[_msgSender()][_rewardTokenAddress].isActiveInvested) {
+            usersInfo[_msgSender()][_rewardTokenAddress].startVersionBlock = currVersion;
+            usersInfo[_msgSender()][_rewardTokenAddress].isActiveInvested = true;
+        }
+        
     }
 
     function withdrawToken(address _tokenAddress, address _rewardTokenAddress, uint256 _amount) external override {
@@ -50,24 +76,33 @@ contract AAVE is Ownable, IAAVEImplementation {
             IAAVEERC20(_rewardTokenAddress).approve(address(LendAAVE), _amount);
             LendAAVE.withdraw(_tokenAddress, _amount, address(this));
             IAAVEERC20(_tokenAddress).transfer(_msgSender(), _amount);
-            userWithdrawnBalance[_msgSender()][_rewardTokenAddress] += _amount;
+            usersInfo[_msgSender()][_rewardTokenAddress].withdrawnBalance += _amount;
+            if (_amount == userBalance) {
+                usersInfo[_msgSender()][_rewardTokenAddress].isActiveInvested = false;
+            }
         }        
     }
     
     // public for testing otherwise internal call
     function calculateUserBalance(address _rewardTokenAddress) public view override returns(uint256) {
         uint256 userBalance;
+        uint256 userStartVersion = usersInfo[_msgSender()][_rewardTokenAddress].startVersionBlock;
         uint256 currVersion =  zpController.latestVersion();
-
-        for (uint i = 0; i <= currVersion; i++) {
+        uint256 riskPoolCategory;
+        for (uint i = userStartVersion; i <= currVersion; i++) {
             uint256 userVersionBalance = userTransactionInfo[_msgSender()][_rewardTokenAddress][i];
+            if (zpController.ifProtocolUpdated(protocolID, i)) {
+                riskPoolCategory = zpController.getProtocolRiskCategory(protocolID, i);
+            }
             if (userVersionBalance > 0) {
-                userBalance = (((userVersionBalance+ userBalance) * zpController.versionLiquidationFactor(i)) / 100);
-            } else {
-                userBalance = ((userBalance * zpController.versionLiquidationFactor(i)) / 100);
-            }   
+                userBalance += userVersionBalance;
+            } 
+            if (zpController.isRiskPoolLiquidated(i, riskPoolCategory)) {
+                userBalance = ((userBalance * zpController.getLiquidationFactor(i)) / 100);
+            } 
+              
         }
-        userBalance -= userWithdrawnBalance[_msgSender()][_rewardTokenAddress];
+        userBalance -= usersInfo[_msgSender()][_rewardTokenAddress].withdrawnBalance;
         return userBalance;
     }
 

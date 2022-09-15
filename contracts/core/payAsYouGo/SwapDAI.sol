@@ -10,8 +10,11 @@ contract SwapDAI is Ownable{
     IERC20 private DAI;
     IERC20Extended private sztDAI;
 
-    constructor(address _DAIAddress, address _sztDAIAddress) {
+    function updateDAIAddress(address _DAIAddress) external onlyOwner {
         DAI = IERC20(_DAIAddress);
+    }
+
+    function updatesztDAIAddress(address _sztDAIAddress) external onlyOwner {
         sztDAI = IERC20Extended(_sztDAIAddress);
     }
 

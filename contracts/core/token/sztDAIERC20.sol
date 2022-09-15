@@ -8,9 +8,16 @@ import "./../../dependencies/openzeppelin/Ownable.sol";
 /// Report any bug or issues at:
 /// @custom:security-contact anshik@safezen.finance
 contract sztDAI is ERC20, IERC20Extended {
+    address public CFAContract;
+    address public swapDAIContract;
 
     constructor(address _constantFlowCA) 
     ERC20("szt DAI Stream Token", "sztDAI", 18, _constantFlowCA) {
+    }
+
+    modifier onlyAccessToContractAddress() override {
+        require((_msgSender() == swapDAIContract) || (_msgSender() == CFAContract));
+        _;
     }
     
     function mint(address to, uint256 amount) external onlyAccessToContractAddress returns(bool) {

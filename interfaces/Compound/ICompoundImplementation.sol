@@ -9,6 +9,6 @@ interface ICompoundImplementation {
 
     function withdrawToken(address tokenAddress, address rewardTokenAddress, uint256 _amount) external returns(bool);
 
-    function calculateUserBalance(address userAddress, address rewardTokenAddress) external view returns(uint256);
+    function calculateUserBalance(address rewardTokenAddress) external view returns(uint256);
 
 }

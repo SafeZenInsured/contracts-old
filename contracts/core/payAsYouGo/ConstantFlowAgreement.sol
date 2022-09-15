@@ -144,7 +144,7 @@ contract ConstantFlowAgreement is Ownable, ICFA{
     error LowUserBalance();
     function transferFrom(address from, address to, uint256 _amount) public override returns(bool) {
         uint256[] memory activeID = findActiveFlows(_msgSender(), protocolRegistry.protocolID());
-        uint256 expectedAmountToBePaid = totalInsuranceAmountExpectedToBePaid(from, activeID);
+        uint256 expectedAmountToBePaid = totalAmountExpectedToBePaid(from, activeID);
         uint256 userBalance = sztDAI.balanceOf(from); 
         if ((expectedAmountToBePaid + _amount) > userBalance) {
             bool success = sztDAI.transferFrom(from, to, _amount);
@@ -181,7 +181,7 @@ contract ConstantFlowAgreement is Ownable, ICFA{
     }
 
     /// internal call for transferFrom [not for external or public calls]
-    function totalInsuranceAmountExpectedToBePaid(address _userAddress, uint256[] memory _activeID) internal view returns(uint256) {
+    function totalAmountExpectedToBePaid(address _userAddress, uint256[] memory _activeID) internal view returns(uint256) {
         uint256 balanceToBePaid;
         for (uint256 i=0; i< _activeID.length; i++){
             UserInsuranceInfo storage userActiveInsuranceInfo = usersInsuranceInfo[_userAddress][_activeID[i]];

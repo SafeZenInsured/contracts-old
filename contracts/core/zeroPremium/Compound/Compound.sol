@@ -12,19 +12,37 @@ import "./../ZPController.sol";
 /// @custom:security-contact anshik@safezen.finance
 contract CompoundPool is Ownable, ICompoundImplementation {
     ZPController zpController;
+    uint256 protocolID;
     
-    // userAddress -> tokenAddress -> version -> tokenBalance
-    mapping(address => mapping(address => mapping(uint256 => uint256))) public userTokenBalance;
-    // userAddress -> tokenAddress -> withdrawnBalance
-    mapping(address => mapping(address => uint256)) public userWithdrawnBalance;
+    struct UserInfo {
+        bool isActiveInvested;
+        uint256 startVersionBlock;
+        uint256 withdrawnBalance;
+    }
 
-    function updateZeroPremiumController(address _controllerAddress) external onlyOwner {
+    /// User Address => Reward Token Address => Version => UserTransactionInfo
+    mapping(address => mapping(address => mapping(uint256 => uint256))) private userTokenBalance;
+    mapping(address => mapping(address => UserInfo)) private usersInfo;
+
+    constructor(address _controllerAddress) {
         zpController = ZPController(_controllerAddress);
     }
 
     function mintERC20Tokens(address _userAddress, address _tokenAddress, uint256 _amount) external override {
         IErc20 token = IErc20(_tokenAddress);
         token.allocateTo(_userAddress, _amount);
+    }
+
+    /// Initialize this function first before running any other function
+    function addCompoundProtocolInfo(
+        string memory _protocolName,
+        address _deployedAddress,
+        bool _isCommunityGoverned,
+        uint256 _riskFactor,
+        uint256 _riskPoolCategory
+    ) external onlyOwner {
+        protocolID = zpController.protocolID();
+        zpController.addCoveredProtocol(_protocolName, _deployedAddress, _isCommunityGoverned, _riskFactor, _riskPoolCategory);
     }
 
     error TransactionFailedError();
@@ -34,18 +52,22 @@ contract CompoundPool is Ownable, ICompoundImplementation {
             revert LowSupplyAmountError();
         }
         IErc20(_tokenAddress).transferFrom(_msgSender(), address(this), _amount);
-        // NOTE: Compound Fake ERC20 token doesn't support transferFrom functionality [Real one will support ]
+        /// NOTE: Compound Fake ERC20 token doesn't support transferFrom functionality [Real one will support ]
         uint256 currVersion =  zpController.latestVersion();
         uint256 balanceBeforeSupply = ICErc20(_rewardTokenAddress).balanceOf(address(this));
         IErc20(_tokenAddress).approve(_rewardTokenAddress, _amount);
         uint mintResult = ICErc20(_rewardTokenAddress).mint(_amount);
         uint256 balanceAfterSupply = ICErc20(_rewardTokenAddress).balanceOf(address(this));
         userTokenBalance[_msgSender()][_rewardTokenAddress][currVersion] += (balanceAfterSupply - balanceBeforeSupply);
+        if (!usersInfo[_msgSender()][_rewardTokenAddress].isActiveInvested) {
+            usersInfo[_msgSender()][_rewardTokenAddress].startVersionBlock = currVersion;
+            usersInfo[_msgSender()][_rewardTokenAddress].isActiveInvested = true;
+        }
         return mintResult;
     }
 
     function withdrawToken(address _tokenAddress, address _rewardTokenAddress, uint256 _amount) external override returns (bool) {
-        uint256 userBalance = calculateUserBalance(_msgSender(), _rewardTokenAddress);
+        uint256 userBalance = calculateUserBalance(_rewardTokenAddress);
         if (userBalance >= _amount) {
             ICErc20 rewardToken = ICErc20(_rewardTokenAddress);
             // rewardToken.approve(_rewardTokenAddress, _amount);
@@ -56,7 +78,10 @@ contract CompoundPool is Ownable, ICompoundImplementation {
             uint256 amountToBePaid = (balanceAfterRedeem - balanceBeforeRedeem);
             // IErc20(_tokenAddress).transferFrom(address(this), _msgSender(), amountToBePaid);
             // IErc20 transfer doesn't work for Compound
-            userWithdrawnBalance[_msgSender()][_rewardTokenAddress] += _amount;
+            usersInfo[_msgSender()][_rewardTokenAddress].withdrawnBalance += _amount;
+            if (_amount == userBalance) {
+                usersInfo[_msgSender()][_rewardTokenAddress].isActiveInvested = false;
+            }
             return true;
         }
         return false;
@@ -64,19 +89,25 @@ contract CompoundPool is Ownable, ICompoundImplementation {
 
     
 
-    function calculateUserBalance(address userAddress, address _rewardTokenAddress) public view override returns(uint256) {
+    function calculateUserBalance(address _rewardTokenAddress) public view override returns(uint256) {
         uint256 userBalance;
+        uint256 userStartVersion = usersInfo[_msgSender()][_rewardTokenAddress].startVersionBlock;
         uint256 currVersion =  zpController.latestVersion();
-
-        for (uint i = 0; i <= currVersion; i++) {
-            uint256 userVersionBalance = userTokenBalance[userAddress][_rewardTokenAddress][i];
+        uint256 riskPoolCategory;
+        for (uint i = userStartVersion; i <= currVersion; i++) {
+            uint256 userVersionBalance = userTokenBalance[_msgSender()][_rewardTokenAddress][i];
+            if (zpController.ifProtocolUpdated(protocolID, i)) {
+                riskPoolCategory = zpController.getProtocolRiskCategory(protocolID, i);
+            }
             if (userVersionBalance > 0) {
-                userBalance = (((userVersionBalance+ userBalance) * zpController.versionLiquidationFactor(i)) / 100);
-            } else {
-                userBalance = ((userBalance * zpController.versionLiquidationFactor(i)) / 100);
-            }    
+                userBalance += userVersionBalance;
+            } 
+            if (zpController.isRiskPoolLiquidated(i, riskPoolCategory)) {
+                userBalance = ((userBalance * zpController.getLiquidationFactor(i)) / 100);
+            } 
+              
         }
-        userBalance -= (userWithdrawnBalance[userAddress][_rewardTokenAddress]);
+        userBalance -= usersInfo[_msgSender()][_rewardTokenAddress].withdrawnBalance;
         return userBalance;
     }
 }
