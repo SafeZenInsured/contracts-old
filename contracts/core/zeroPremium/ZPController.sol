@@ -101,7 +101,7 @@ contract ZPController is Ownable {
         versionLiquidationFactor[latestVersion].liquidation = 100;
     }
 
-    function updateVersionInfo(uint256 _riskPoolCategory, uint256 _liquidationFactor) external onlyOwner {
+    function liduidateRiskPool(uint256 _riskPoolCategory, uint256 _liquidationFactor) external onlyOwner {
         versionLiquidationFactor[latestVersion].liquidation = _liquidationFactor;
         versionLiquidationFactor[latestVersion].riskPoolCategory = _riskPoolCategory;
         addNewVersion();

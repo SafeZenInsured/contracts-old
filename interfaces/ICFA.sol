@@ -20,6 +20,8 @@ interface ICFA {
     
     function closeAllStream(address _userAddress) external;
 
-    function updateFlow(uint256 _insuredAmount, uint256 _protocolID) external;
+    function addInsuranceAmount(uint256 _insuredAmount, uint256 _protocolID) external;
+
+    function minusInsuranceAmount(uint256 _insuredAmount, uint256 _protocolID) external;
 
 }

@@ -5,13 +5,14 @@ import "./../../dependencies/openzeppelin/Ownable.sol";
 import "./../../../interfaces/IERC20.sol";
 import "./../../../interfaces/IERC20Extended.sol";
 import "./../../../interfaces/ICFA.sol";
-import "./ProtocolsRegistry.sol";
+import "./../../../interfaces/IProtocolsRegistry.sol";
 import "./../infra/TerminateInsurance.sol";
+import "./../../../interfaces/IProtocolsRegistry.sol";
 
 /// Report any bug or issues at:
 /// @custom:security-contact anshik@safezen.finance
 contract ConstantFlowAgreement is Ownable, ICFA{
-    ProtocolRegistry private protocolRegistry;
+    IProtocolsRegistry private protocolRegistry;
     IERC20 private DAI;
     IERC20Extended private sztDAI;
     TerminateInsurance private terminateInsurance;
@@ -25,8 +26,8 @@ contract ConstantFlowAgreement is Ownable, ICFA{
         terminateInsurance = TerminateInsurance(_contractAddress);
     }
 
-    function updateProtocolInfoAddress(address _protocolInfoAddress) external onlyOwner {
-        protocolRegistry = ProtocolRegistry(_protocolInfoAddress);
+    function updateProtocolRegistryAddress(address _protocolRegistryAddress) external onlyOwner {
+        protocolRegistry = IProtocolsRegistry(_protocolRegistryAddress);
     }
 
     /// @dev collects user information for each protocol ID
@@ -53,6 +54,7 @@ contract ConstantFlowAgreement is Ownable, ICFA{
 
     uint256 minimumInsurancePeriod = 120 minutes; // [in minutes]
     uint256 maxInsuredDays = 90 days; // max. insurance period [in days]
+    uint256 startWaitingTime = 8 hours; // insurance active after given waiting period
     
     error ProtocolNotActiveError();
     error NotEvenMinimumInsurancePeriodAmount();
@@ -61,7 +63,6 @@ contract ConstantFlowAgreement is Ownable, ICFA{
     /// @param _protocolID: like AAVE which a user want cover against
     function activateInsurance(uint256 _insuredAmount, uint256 _protocolID) public override {
         if (
-            (!protocolRegistry.getIsProtocolActive(_protocolID)) ||
             (!protocolRegistry.ifEnoughLiquidity(_insuredAmount, _protocolID))    
         ) {
             revert ProtocolNotActiveError();
@@ -88,19 +89,28 @@ contract ConstantFlowAgreement is Ownable, ICFA{
         UserInsuranceInfo storage userInsuranceInfo = usersInsuranceInfo[_msgSender()][_protocolID];
         userInsuranceInfo.insuredAmount = _insuredAmount;
         userInsuranceInfo.insuranceFlowRate = flowRate;
-        userInsuranceInfo.startTime = block.timestamp;
+        userInsuranceInfo.startTime = block.timestamp + (startWaitingTime * 1 hours);
         userInsuranceInfo.validTill = userGlobalInsuranceInfo.validTill;
         userInsuranceInfo.isValid = true;
-        protocolRegistry.addCoverageOffered(_protocolID, _insuredAmount);
+        protocolRegistry.addCoverageOffered(_protocolID, _insuredAmount, flowRate);
         terminateInsurance.createGelatoProtocolSpecificTask(_msgSender(), _protocolID);
     }
 
     error InactiveInsuranceError();
-    function updateFlow(uint256 _insuredAmount, uint256 _protocolID) external override {
+    function addInsuranceAmount(uint256 _insuredAmount, uint256 _protocolID) external override {
         if (!usersInsuranceInfo[_msgSender()][_protocolID].isValid) {
             revert InactiveInsuranceError();
         }
         uint256 newInsuredAmount = usersInsuranceInfo[_msgSender()][_protocolID].insuredAmount + _insuredAmount;
+        closeTokenStream(_msgSender(), _protocolID);
+        activateInsurance(newInsuredAmount, _protocolID);
+    }
+
+    function minusInsuranceAmount(uint256 _insuredAmount, uint256 _protocolID) external override {
+        if (!usersInsuranceInfo[_msgSender()][_protocolID].isValid) {
+            revert InactiveInsuranceError();
+        }
+        uint256 newInsuredAmount = usersInsuranceInfo[_msgSender()][_protocolID].insuredAmount - _insuredAmount;
         closeTokenStream(_msgSender(), _protocolID);
         activateInsurance(newInsuredAmount, _protocolID);
     }
