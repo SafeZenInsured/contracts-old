@@ -24,7 +24,7 @@ contract ERC20 is Context, IERC20 {
         _contractAddress = contractAddress_;
     }
 
-    modifier onlyAccessToContractAddress() {
+    modifier onlyAccessToContractAddress() virtual {
         require(_msgSender() == _contractAddress);
         _;
     }

@@ -4,11 +4,12 @@ pragma solidity ^0.8.0;
 import "./../../dependencies/openzeppelin/Ownable.sol";
 import "./../../../interfaces/ISZTStaking.sol";
 import "./../../../interfaces/IBuySellSZT.sol";
+import "./../../../interfaces/ICoveragePool.sol";
 import "./../../../interfaces/IERC20.sol";
 import "./../../../interfaces/IProtocolsRegistry.sol";
 
 
-contract CoveragePool is Ownable {
+contract CoveragePool is Ownable, ICoveragePool {
     uint256 public minCoveragePoolAmount;
     IBuySellSZT public buySellContract;
     IERC20 public SZTToken;
@@ -33,24 +34,28 @@ contract CoveragePool is Ownable {
     struct UserInfo {
         bool isActiveInvested;
         uint256 startVersionBlock;
-        uint256 withdrawnBalance;
+    }
+
+    struct BalanceInfo {
+        uint256 depositedAmount;
+        uint256 withdrawnAmount;
     }
 
     // user address => protocol id => withdrawal wait period
     mapping (address => mapping(uint256 => withdrawWaitPeriod)) private checkWaitTime;
     // user address => protocol id => version => underwriterinfo
-    mapping(address => mapping(uint256 => mapping(uint256 => uint256))) private underwriterBalance;
+    mapping(address => mapping(uint256 => mapping(uint256 => BalanceInfo))) private underwritersBalance;
 
     mapping(address => mapping(uint256 => UserInfo)) private usersInfo;
 
     error NotAMinimumPoolAmountError();
-    function underwrite(uint256 _value, uint256 _protocolID) public returns(bool) {
+    function underwrite(uint256 _value, uint256 _protocolID) public override returns(bool) {
         if (_value < minCoveragePoolAmount) {
             revert NotAMinimumPoolAmountError();
         }
         uint256 currVersion = protocolsRegistry.version();
         protocolsRegistry.addProtocolLiquidation(_protocolID, _value); // first this, then underwriterBalance
-        underwriterBalance[_msgSender()][_protocolID][currVersion] = _value;
+        underwritersBalance[_msgSender()][_protocolID][currVersion].depositedAmount = _value;
         totalTokensStaked += _value;
         if (!usersInfo[_msgSender()][_protocolID].isActiveInvested) {
             usersInfo[_msgSender()][_protocolID].startVersionBlock = currVersion;
@@ -66,7 +71,7 @@ contract CoveragePool is Ownable {
         waitingTime = _timeInDays * 20 seconds;
     }
     
-    function activateWithdrawalTimer(uint256 _value, uint256 _protocolID) external returns(bool) {
+    function activateWithdrawalTimer(uint256 _value, uint256 _protocolID) external override returns(bool) {
         if (
             (!(checkWaitTime[_msgSender()][_protocolID].ifTimerStarted)) || 
             (checkWaitTime[_msgSender()][_protocolID].SZTTokenCount < _value)
@@ -81,7 +86,7 @@ contract CoveragePool is Ownable {
     }
 
     error TransactionFailedError();
-    function withdraw(uint256 _value, uint256 _protocolID) external returns(bool) {
+    function withdraw(uint256 _value, uint256 _protocolID) external override returns(bool) {
         uint256 userBalance = calculateUserBalance(_protocolID);
         if (
             (userBalance < _value) || 
@@ -90,14 +95,16 @@ contract CoveragePool is Ownable {
         ) {
             revert TransactionFailedError();
         }
-        SZTToken.approve(_msgSender(), _value);
-        bool success = buySellContract.transferSZT(address(this), _msgSender(), _value);
-        usersInfo[_msgSender()][_protocolID].withdrawnBalance += _value;
+        uint256 currVersion = protocolsRegistry.version();
+        protocolsRegistry.removeProtocolLiquidation(_protocolID, _value);
+        underwritersBalance[_msgSender()][_protocolID][currVersion].withdrawnAmount += _value;
         checkWaitTime[_msgSender()][_protocolID].SZTTokenCount -= _value;
         if (checkWaitTime[_msgSender()][_protocolID].SZTTokenCount == _value) {
             checkWaitTime[_msgSender()][_protocolID].ifTimerStarted = false;
         }
         totalTokensStaked -= _value;
+        SZTToken.approve(_msgSender(), _value);
+        bool success = buySellContract.transferSZT(address(this), _msgSender(), _value);
         return success;
     }
 
@@ -116,21 +123,31 @@ contract CoveragePool is Ownable {
         uint256 userBalance;
         uint256 userStartVersion = usersInfo[_msgSender()][_protocolID].startVersionBlock;
         uint256 currVersion =  protocolsRegistry.version();
+        uint256 premiumEarnedFlowRate;
+        uint256 userPremiumEarned;
         uint256 riskPoolCategory;
         for (uint i = userStartVersion; i <= currVersion; i++) {
-            uint256 userVersionBalance = underwriterBalance[_msgSender()][_protocolID][i];
+            uint256 userVersionDepositedBalance = underwritersBalance[_msgSender()][_protocolID][i].depositedAmount;
+            uint256 userVersionWithdrawnBalance = underwritersBalance[_msgSender()][_protocolID][i].withdrawnAmount;
             if (protocolsRegistry.ifProtocolUpdated(_protocolID, i)) {
                 riskPoolCategory = protocolsRegistry.getProtocolRiskCategory(_protocolID, i);
             }
-            if (userVersionBalance > 0) {
-                userBalance += userVersionBalance;
+            if (protocolsRegistry.getEarnedPremiumFlowRate(riskPoolCategory, i) != premiumEarnedFlowRate) {
+                premiumEarnedFlowRate = protocolsRegistry.getEarnedPremiumFlowRate(riskPoolCategory, i);
+            }
+            if (userVersionDepositedBalance > 0) {
+                userBalance += userVersionDepositedBalance;
+            } 
+            if (userVersionWithdrawnBalance > 0) {
+                userBalance -= userVersionWithdrawnBalance;
             } 
             if (protocolsRegistry.isRiskPoolLiquidated(i, riskPoolCategory)) {
                 userBalance = ((userBalance * protocolsRegistry.getLiquidationFactor(riskPoolCategory, i)) / 100);
             } 
+            userPremiumEarned = ((userBalance * premiumEarnedFlowRate)/protocolsRegistry.getGlobalProtocolLiquidity(riskPoolCategory, i));
               
         }
-        userBalance -= usersInfo[_msgSender()][_protocolID].withdrawnBalance;
+        userBalance += userPremiumEarned;
         return userBalance;
     }
 }

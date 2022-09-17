@@ -11,5 +11,5 @@ interface ISZTStaking {
 
     function buyAndStakeSZT(uint256 _value) external returns(bool);
 
-    function totalTokensStaked() external returns(uint256);
+    function totalTokensStaked() external view returns(uint256);
 }

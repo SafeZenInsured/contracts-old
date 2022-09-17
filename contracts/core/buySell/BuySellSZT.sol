@@ -5,6 +5,7 @@ import "./../../../interfaces/IERC20.sol";
 import "./../../../interfaces/IERC20Extended.sol";
 import "./../../../interfaces/IBuySellSZT.sol";
 import "./../../../interfaces/ISZTStaking.sol";
+import "./../../../interfaces/ICoveragePool.sol";
 import "./../../dependencies/openzeppelin/Ownable.sol";
 
 /// Report any bug or issues at:
@@ -18,6 +19,7 @@ contract BuySellSZT is Ownable, IBuySellSZT{
     IERC20Extended private SafeZenGovernanceToken; // native GSZT token
     IERC20 private immutable DAI; // DAI address
     ISZTStaking public SZTStaking; 
+    ICoveragePool public CoveragePool;
 
     /// @dev adds the sell timer, allowing user to sell only after the specified time period
     /// @param ifTimerStarted: checks if the sell timer has started
@@ -210,7 +212,7 @@ contract BuySellSZT is Ownable, IBuySellSZT{
             (block.timestamp >= checkWaitTime[_msgSender()].canWithdrawTime) &&
             (_value <= checkWaitTime[_msgSender()].SZTTokenCount)
         ) {
-            uint256 tokenCount = tokenCounter - SZTStaking.totalTokensStaked();
+            uint256 tokenCount = getSZTTokenCount();
             bool SZTTransferSuccess = SafeZenToken.transferFrom(_msgSender(), address(this), _value);
             bool GSZTBurnSuccess = SafeZenGovernanceToken.burnFrom(_msgSender(), burnGSZTToken(_msgSender()));
             (/*amountPerToken*/, uint256 amountToBeReleased) = calculateSZTPrice((tokenCount - _value), tokenCount);
@@ -231,6 +233,11 @@ contract BuySellSZT is Ownable, IBuySellSZT{
     /// @dev to check the common ratio used in the price calculation of SZT token 
     function getCommonRatio() view external returns (uint256) {
         return _commonRatio;
+    }
+
+    function getSZTTokenCount() public view returns(uint256) {
+        uint256 tokenCount = ((tokenCounter - SZTStaking.totalTokensStaked()) - CoveragePool.totalTokensStaked());
+        return tokenCount;
     }
 
 }

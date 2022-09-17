@@ -3,12 +3,18 @@ pragma solidity ^0.8.0;
 
 import "./../../../interfaces/IProtocolsRegistry.sol";
 import "./../../dependencies/openzeppelin/Ownable.sol";
+import "./../../../interfaces/IBuySellSZT.sol";
 
 /// Report any bug or issues at:
 /// @custom:security-contact anshik@safezen.finance
 contract ProtocolRegistry is IProtocolsRegistry, Ownable {
     uint256 public protocolID = 0;
     uint256 public version = 0;
+    IBuySellSZT public buySellSZT;
+
+    function setBuySellSZT(address _buySellSZTCA) external onlyOwner {
+        buySellSZT = IBuySellSZT(_buySellSZTCA);
+    }
 
     struct ProtocolInfo { 
         string protocolName;
@@ -45,8 +51,19 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
 
     mapping(uint256 => uint256) public versionLiquidation;
 
-    function getTimeInterval() external view returns(uint256) {
-        
+    function getEarnedPremiumFlowRate(uint256 _riskPoolCategory, uint256 _version) external view override returns(uint256) {
+        return GlobalProtocolsInfo[_riskPoolCategory][_version].globalIncomingStreamFlowRate;
+    }
+
+    function getGlobalProtocolLiquidity(uint256 _riskPoolCategory, uint256 _version) external view returns (uint256) {
+        return GlobalProtocolsInfo[_riskPoolCategory][_version].globalProtocolLiquidity;
+    }
+
+    function getTimeInterval(uint256 _riskPoolCategory, uint256 _version) external view returns(uint256) {
+        uint256 startTime = GlobalProtocolsInfo[_riskPoolCategory][_version].startTime;
+        uint256 endTime = GlobalProtocolsInfo[_riskPoolCategory][_version].endTime;
+        endTime = endTime > 0 ? endTime : block.timestamp;
+        return (endTime-startTime); 
     }
 
     function liquidatePositions(uint256 _riskPoolCategory, uint256 _liquidatedPercent) external onlyOwner {
@@ -103,7 +120,9 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
         GlobalProtocolsInfo[_riskPoolCategory][version].endTime = block.timestamp;
         uint256 previousIncomingFlowRate = GlobalProtocolsInfo[_riskPoolCategory][version].globalIncomingStreamFlowRate;
         version ++;
-        ProtocolInfos[_protocolID].coverageOffered += _coverageAmount;
+        uint256 SZTTokenCounter = buySellSZT.getSZTTokenCount();
+        (, uint256 amountCoveredInDAI) = buySellSZT.calculateSZTPrice((SZTTokenCounter - _coverageAmount), SZTTokenCounter);
+        ProtocolInfos[_protocolID].coverageOffered += amountCoveredInDAI;
         GlobalProtocolsInfo[_riskPoolCategory][version].startTime = block.timestamp;
         GlobalProtocolsInfo[_riskPoolCategory][version].globalIncomingStreamFlowRate = previousIncomingFlowRate + _incomingFlowRate;
     }
@@ -117,7 +136,9 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
         GlobalProtocolsInfo[_riskPoolCategory][version].endTime = block.timestamp;
         uint256 previousIncomingFlowRate = GlobalProtocolsInfo[_riskPoolCategory][version].globalIncomingStreamFlowRate;
         version ++;
-        ProtocolInfos[_protocolID].coverageOffered -= _coverageAmount;
+        uint256 SZTTokenCounter = buySellSZT.getSZTTokenCount();
+        (, uint256 amountCoveredInDAI) = buySellSZT.calculateSZTPrice(SZTTokenCounter, (SZTTokenCounter +  _coverageAmount));
+        ProtocolInfos[_protocolID].coverageOffered -= amountCoveredInDAI;
         GlobalProtocolsInfo[_riskPoolCategory][version].startTime = block.timestamp;
         GlobalProtocolsInfo[_riskPoolCategory][version].globalIncomingStreamFlowRate = previousIncomingFlowRate - _incomingFlowRate;
     }

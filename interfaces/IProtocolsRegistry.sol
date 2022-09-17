@@ -32,6 +32,11 @@ interface IProtocolsRegistry {
         uint256 _liquiditySupplied
     ) external;
 
+    function removeProtocolLiquidation(
+        uint256 _protocolID, 
+        uint256 _liquiditySupplied
+    ) external;
+
     function requestAddNewProtocol(string memory _protocolName, address _protocolAddress) external;
 
     function ifProtocolUpdated(uint256 _protocolID, uint256 _version) external view returns (bool);
@@ -41,5 +46,11 @@ interface IProtocolsRegistry {
     function getLiquidationFactor(uint256 _riskPoolCategory, uint256 _version) external view returns(uint256);
 
     function isRiskPoolLiquidated(uint256 _version, uint256 _riskPoolCategory) external view returns (bool);
+
+    function getTimeInterval(uint256 _riskPoolCategory, uint256 _version) external view returns(uint256);
+
+    function getEarnedPremiumFlowRate(uint256 _riskPoolCategory, uint256 _version) external view returns(uint256);
+
+    function getGlobalProtocolLiquidity(uint256 _riskPoolCategory, uint256 _version) external view returns (uint256);
 
 }
