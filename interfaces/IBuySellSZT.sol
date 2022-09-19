@@ -24,4 +24,6 @@ interface IBuySellSZT {
     function calculateSZTPrice(uint256 issuedSZTTokens, uint256 requiredTokens) view external returns(uint, uint);
 
     function getSZTTokenCount() external view returns(uint256);
+
+    function stakingTransferSZT(address _from, address _to, uint _value) external returns(bool);
 }

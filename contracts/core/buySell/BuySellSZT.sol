@@ -7,25 +7,26 @@ import "./../../../interfaces/IBuySellSZT.sol";
 import "./../../../interfaces/ISZTStaking.sol";
 import "./../../../interfaces/ICoveragePool.sol";
 import "./../../dependencies/openzeppelin/Ownable.sol";
+import "./../../dependencies/openzeppelin/Pausable.sol";
 
 /// Report any bug or issues at:
 /// @custom:security-contact anshik@safezen.finance
-contract BuySellSZT is Ownable, IBuySellSZT{
+contract BuySellSZT is Ownable, IBuySellSZT, Pausable {
     uint256 public constant SZTBasePrice = 100;  // SZT token base price
     uint256 public tokenCounter = 0;  // SZT tokens in circulation
-    uint256 private constant _SZTBasePriceWithDecimals = 100 * 1e18; // SZT token base price with decimals
+    uint256 public constant SZTBasePriceWithDecimals = 100 * 1e18; // SZT token base price with decimals
     uint256 private immutable _commonRatio;  // common ratio for SZT YUVAA calculations
     IERC20 private SafeZenToken; // native SZT token
     IERC20Extended private SafeZenGovernanceToken; // native GSZT token
-    IERC20 private immutable DAI; // DAI address
-    ISZTStaking public SZTStaking; 
-    ICoveragePool public CoveragePool;
+    IERC20 private DAI; // DAI address
+    ISZTStaking private SZTStaking; 
+    ICoveragePool private CoveragePool;
 
     /// @dev adds the sell timer, allowing user to sell only after the specified time period
     /// @param ifTimerStarted: checks if the sell timer has started
     /// @param SZTTokenCount: record the number of tokens user wishes to sell
     /// @param canWithdrawTime: record the time when user can sell their tokens to BuySell Contract
-    struct sellWaitPeriod{
+    struct SellWaitPeriod{
         bool ifTimerStarted;
         uint256 SZTTokenCount;
         uint256 canWithdrawTime;
@@ -34,12 +35,20 @@ contract BuySellSZT is Ownable, IBuySellSZT{
     /// @dev record the user penalty [governance, if they try to cheat in the claim and governance decisions]
     mapping (address => uint256) private userSZTPenalty; 
     /// @dev map each user address with the sellWaitPeriod struct
-    mapping (address => sellWaitPeriod) private checkWaitTime;
+    mapping (address => SellWaitPeriod) private checkWaitTime;
     
     /// @dev non-changable commonRatio, needed for non-speculation part of our SZT tokens
-    constructor(uint value, uint decimals, address _DAITokenCA) {
-        _commonRatio = (value * 10e17) / (10 ** decimals);
-        DAI = IERC20(_DAITokenCA);   
+    /// @param value: value of the common Ratio
+    /// @param decimals: decimals against the value of the commmon ratio
+    constructor(uint value, uint decimals) {
+        _commonRatio = (value * 10e17) / (10 ** decimals);  
+    }
+
+    /// @dev to set the address of the DAI token
+    /// NOTE: DAI to be an immutable variable, created function for testing purposes
+    /// @param _DAIaddress: address of the DAI token
+    function setDAIAddress(address _DAIaddress) external onlyOwner {
+        DAI = IERC20(_DAIaddress);
     }
 
     /// @dev to set the address of our SZT token
@@ -48,8 +57,16 @@ contract BuySellSZT is Ownable, IBuySellSZT{
         SafeZenToken = IERC20(_safeZenTokenCA);
     }
 
+    /// @dev to set the address of SZT staking contract
+    /// @param _SZTStakingCA: address of the SZT staking contract
     function setSZTStakingCA(address _SZTStakingCA) external onlyOwner {
         SZTStaking = ISZTStaking(_SZTStakingCA);
+    }
+
+    /// @dev to set the address of the pay-as-you-go-coverage pool contract
+    /// @param _coveragePoolCA: address of the coverage pool contract
+    function setCoveragePoolCA(address _coveragePoolCA) external onlyOwner {
+        CoveragePool = ICoveragePool(_coveragePoolCA);
     }
 
     /// @dev to set the address of our GSZT token
@@ -74,7 +91,7 @@ contract BuySellSZT is Ownable, IBuySellSZT{
         // uint256 _required = requiredTokens > 1e18 ? requiredTokens - 1e18 : 1e18 - requiredTokens;
         uint256 tokenDifference = (issuedSZTTokens + (requiredTokens - 1e18));
         uint256 averageDiff = ((SZTCommonRatio * tokenDifference) / 2) / 1e18;
-        uint256 amountPerToken = _SZTBasePriceWithDecimals + averageDiff;
+        uint256 amountPerToken = SZTBasePriceWithDecimals + averageDiff;
         uint256 amountToBePaid = (amountPerToken * (requiredTokens - issuedSZTTokens))/1e18;
         return (amountPerToken, amountToBePaid);
     }
@@ -86,7 +103,7 @@ contract BuySellSZT is Ownable, IBuySellSZT{
     function calculateGSZTCommonRatio(uint256 issuedSZTTokens, uint256 alpha, uint256 decimals) pure internal returns(uint256) {
         uint256 GSZTcommonRatio = ((alpha * 1e18) / (10 ** decimals));
         uint256 tokenValue = (GSZTcommonRatio * SZTBasePrice * issuedSZTTokens) / 1e18;
-        uint256 amountPerToken = _SZTBasePriceWithDecimals + tokenValue;
+        uint256 amountPerToken = SZTBasePriceWithDecimals + tokenValue;
         return amountPerToken;
     }
 
@@ -129,6 +146,12 @@ contract BuySellSZT is Ownable, IBuySellSZT{
         SafeZenGovernanceToken.mint(_investorAddress, GSZTToMint);
     }
 
+    function transferGSZTforInvestors(address _investorAddress, address _newInvestorAddress) external onlyOwner {
+        uint256 GSZTBalance = SafeZenGovernanceToken.balanceOf(_investorAddress);
+        SafeZenGovernanceToken.burnFrom(_investorAddress, GSZTBalance);
+        SafeZenGovernanceToken.mint(_newInvestorAddress, GSZTBalance);
+    }
+
     error LowAmountError();
     /// @dev buying our native non-speculative SZT token
     /// @param _value: amount of SZT tokens user wishes to purchase
@@ -159,6 +182,7 @@ contract BuySellSZT is Ownable, IBuySellSZT{
             revert ZeroAddressTransactionError();
         }
         bool success = SafeZenToken.transferFrom(_from, _to, _value);
+
         mintGSZT(_to);
 
         if (_from != address(this)) {
@@ -172,6 +196,19 @@ contract BuySellSZT is Ownable, IBuySellSZT{
         return true;
     }
 
+    modifier onlySZTStakingContract() {
+        require(_msgSender() == address(SZTStaking));
+        _;
+    }
+
+    function stakingTransferSZT(address _from, address _to, uint _value) external override onlySZTStakingContract returns(bool) {
+        bool success = SafeZenToken.transferFrom(_from, _to, _value);
+        if (_to != address(SZTStaking)) {
+          mintGSZT(_to);  
+        }
+        return success;
+    }
+
     /// @dev Burning the GSZT token
     /// @param _userAddress: wallet address of the user
     function burnGSZTToken(address _userAddress) view internal returns(uint256) {
@@ -183,6 +220,11 @@ contract BuySellSZT is Ownable, IBuySellSZT{
         return amountToBeBurned;
     }
 
+    uint256 public sellTimer = 1 minutes;
+    /// NOTE: Changing minutes to day [minutes done for testing purpose]
+    function setWithdrawTime(uint256 _time) external onlyOwner {
+        sellTimer = _time * 1 minutes;
+    }
     /// @dev activating the timer if the user wishes to sell his/her/their tokens [to prevent front running]
     /// @param _value: the amount of token user wishes to withdraw
     function activateSellTimer(uint256 _value) external override returns(bool) {
@@ -190,21 +232,21 @@ contract BuySellSZT is Ownable, IBuySellSZT{
             (!(checkWaitTime[_msgSender()].ifTimerStarted)) || 
             (checkWaitTime[_msgSender()].SZTTokenCount < _value)
         ) {
-            sellWaitPeriod storage waitingTimeCountdown = checkWaitTime[_msgSender()];
+            SellWaitPeriod storage waitingTimeCountdown = checkWaitTime[_msgSender()];
             waitingTimeCountdown.ifTimerStarted = true;
             waitingTimeCountdown.SZTTokenCount = _value;
 
-            waitingTimeCountdown.canWithdrawTime = 1 days + block.timestamp;
+            waitingTimeCountdown.canWithdrawTime = sellTimer + block.timestamp;
             return true;
         }
         return false;
     }
 
     error LowSZTBalanceError();
-    /// NOTE: TODO: Gelato Integration to be done
+    /// NOTE: approve SZT and GSZT amount to BuySellContract before calling this function
     /// @dev selling the SZT tokens
     /// @param _value: the amounnt of SZT tokens user wishes to sell
-    function sellSZTToken(uint256 _value) external returns(bool) {
+    function sellSZTToken(uint256 _value) external whenNotPaused returns(bool) {
         if (SafeZenToken.balanceOf(_msgSender()) < (_value)) {
             revert LowSZTBalanceError();
         }
@@ -235,7 +277,8 @@ contract BuySellSZT is Ownable, IBuySellSZT{
         return _commonRatio;
     }
 
-    function getSZTTokenCount() public view returns(uint256) {
+    /// @dev returns the token in circulation - tokens staked [IMP.]
+    function getSZTTokenCount() public view override returns(uint256) {
         uint256 tokenCount = ((tokenCounter - SZTStaking.totalTokensStaked()) - CoveragePool.totalTokensStaked());
         return tokenCount;
     }

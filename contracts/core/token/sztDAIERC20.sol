@@ -7,7 +7,7 @@ import "./../../dependencies/openzeppelin/Ownable.sol";
 
 /// Report any bug or issues at:
 /// @custom:security-contact anshik@safezen.finance
-contract sztDAI is ERC20, IERC20Extended {
+contract sztDAI is ERC20, IERC20Extended, Ownable {
     address public CFAContract;
     address public swapDAIContract;
 
@@ -18,6 +18,10 @@ contract sztDAI is ERC20, IERC20Extended {
     modifier onlyAccessToContractAddress() override {
         require((_msgSender() == swapDAIContract) || (_msgSender() == CFAContract));
         _;
+    }
+
+    function setSwapDAIAddress(address _swapDAIAddress) external onlyOwner {
+        swapDAIContract = _swapDAIAddress;
     }
     
     function mint(address to, uint256 amount) external onlyAccessToContractAddress returns(bool) {

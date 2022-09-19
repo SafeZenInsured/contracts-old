@@ -17,8 +17,11 @@ contract ConstantFlowAgreement is Ownable, ICFA{
     IERC20Extended private sztDAI;
     TerminateInsurance private terminateInsurance;
 
-    constructor(address _DAIAddress, address _sztDAIAddress) {
-        DAI = IERC20(_DAIAddress);
+    function setDAIAddress(address _DAIaddress) external onlyOwner {
+        DAI = IERC20(_DAIaddress);
+    }
+
+    function setsztDAIAddress(address _sztDAIAddress) external onlyOwner {
         sztDAI = IERC20Extended(_sztDAIAddress);
     }
 

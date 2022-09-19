@@ -11,13 +11,16 @@ import "./../../dependencies/gelato/OpsReady.sol";
 contract TerminateInsurance is OpsReady, Ownable, Pausable {
     using SafeERC20 for IERC20;
 
-    ICFA public immutable _CFA;
+    ICFA public _CFA;
     uint256 public counter;
 
     mapping(address => mapping(uint256 => bytes32)) public taskID;
     mapping(address => bytes32) public majorTaskID;
 
-    constructor(address _ops, address _CFAAddress) OpsReady(_ops) {
+    constructor(address _ops) OpsReady(_ops) {
+    }
+
+    function setCFAAddress(address _CFAAddress) external onlyOwner {
         _CFA = ICFA(_CFAAddress);
     }
 

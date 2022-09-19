@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.0;
 
-import "./../../dependencies/openzeppelin/Context.sol";
+import "./../../dependencies/openzeppelin/Ownable.sol";
 import "./../../../interfaces/ISZTStaking.sol";
 import "./../../../interfaces/IBuySellSZT.sol";
 import "./../../../interfaces/IERC20.sol";
@@ -9,10 +9,11 @@ import "./../../../interfaces/IERC20.sol";
 
 /// NOTE: Staking tokens would be used for activities like flash loans 
 /// to generate rewards for the staked users
-contract SZTStaking is Context, ISZTStaking {
+contract SZTStaking is Ownable, ISZTStaking {
     uint256 public minStakeValue;
     IBuySellSZT public buySellContract;
     IERC20 public SZTToken;
+    IERC20 public GSZTToken;
     uint256 public totalTokensStaked;
 
     constructor(address _buySellAddress, address _SZTTokenAddress) {
@@ -35,6 +36,7 @@ contract SZTStaking is Context, ISZTStaking {
 
     mapping(address => StakerInfo) private stakers;
 
+    /// NOTE: approve SZT to BuySellContract before calling this function 
     error NotAMinimumStakeAmountError();
     function stakeSZT(uint256 _value) public override returns(bool) {
         if (_value < minStakeValue) {
@@ -43,10 +45,15 @@ contract SZTStaking is Context, ISZTStaking {
         StakerInfo storage staker = stakers[_msgSender()];
         staker.amountStaked += _value;
         totalTokensStaked += _value;
-        bool success = buySellContract.transferSZT(_msgSender(), address(this), _value);
+        bool success = buySellContract.stakingTransferSZT(_msgSender(), address(this), _value);
         return success;
     }
 
+    uint256 public withdrawTimer = 1 minutes;
+    /// NOTE: Changing minutes to day [minutes done for testing purpose]
+    function setWithdrawTime(uint256 _time) external onlyOwner {
+        withdrawTimer = _time * 1 minutes;
+    }
     
     // 48 hours waiting period
     function activateWithdrawalTimer(uint256 _value) external override returns(bool) {
@@ -57,7 +64,7 @@ contract SZTStaking is Context, ISZTStaking {
             withdrawWaitPeriod storage waitingTimeCountdown = checkWaitTime[_msgSender()];
             waitingTimeCountdown.ifTimerStarted = true;
             waitingTimeCountdown.SZTTokenCount = _value;
-            waitingTimeCountdown.canWithdrawTime = 2 days + block.timestamp;
+            waitingTimeCountdown.canWithdrawTime = withdrawTimer + block.timestamp;
             return true;
         }
         return false;
@@ -73,13 +80,13 @@ contract SZTStaking is Context, ISZTStaking {
         ) {
             revert TransactionFailedError();
         }
-        SZTToken.approve(_msgSender(), _value);
-        bool success = buySellContract.transferSZT(address(this), _msgSender(), _value);
+        SZTToken.approve(address(buySellContract), _value);
+        bool success = buySellContract.stakingTransferSZT(address(this), _msgSender(), _value);
         staker.amountStaked -= _value;
-        checkWaitTime[_msgSender()].SZTTokenCount -= _value;
         if (checkWaitTime[_msgSender()].SZTTokenCount == _value) {
             checkWaitTime[_msgSender()].ifTimerStarted = false;
         }
+        checkWaitTime[_msgSender()].SZTTokenCount -= _value;
         totalTokensStaked -= _value;
         return success;
     }

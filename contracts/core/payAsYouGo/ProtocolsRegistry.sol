@@ -197,6 +197,16 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
         protocolVersionableInfo.riskPoolCategory = _riskPoolCategory; 
     }
 
+    function viewProtocolInfo(uint256 _protocolID) external view returns(string memory, address, uint256, uint256, uint256) {
+        ProtocolInfo storage protocolInfo = ProtocolInfos[_protocolID];
+        return (protocolInfo.protocolName, 
+                protocolInfo.protocolAddress, 
+                protocolInfo.protocolLiquidity, 
+                protocolInfo.coverageOffered, 
+                protocolInfo.streamFlowRate
+        );
+    }
+
     function updateProtocolRiskPoolCategory(uint256 _protocolID, uint256 _riskPoolCategory) external onlyOwner {
         uint256 beforeRiskPoolCategory = protocolsVersionableInfo[protocolID][version].riskPoolCategory;
         version ++;

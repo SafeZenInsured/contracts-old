@@ -51,7 +51,7 @@ contract CompoundPool is Ownable, ICompoundImplementation {
         if (_amount < 1e10) {
             revert LowSupplyAmountError();
         }
-        IErc20(_tokenAddress).transferFrom(_msgSender(), address(this), _amount);
+        /// IErc20(_tokenAddress).transferFrom(_msgSender(), address(this), _amount);
         /// NOTE: Compound Fake ERC20 token doesn't support transferFrom functionality [Real one will support ]
         uint256 currVersion =  zpController.latestVersion();
         uint256 balanceBeforeSupply = ICErc20(_rewardTokenAddress).balanceOf(address(this));

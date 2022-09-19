@@ -9,7 +9,8 @@ contract FakeCoin is DummyERC20 {
     constructor(string memory _name, string memory _symbol)
         DummyERC20(_name, _symbol, 18)
     {
-        _mint(msg.sender, 2205002100000000000 * 1e18);
+        _mint(msg.sender, 1100 * 1e18);
+        /// 2205002100000000000
     }
 
     function mint(address to, uint256 amount) external returns(bool) {
