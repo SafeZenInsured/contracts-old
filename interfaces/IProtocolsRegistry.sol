@@ -41,7 +41,7 @@ interface IProtocolsRegistry {
 
     function ifProtocolUpdated(uint256 _protocolID, uint256 _version) external view returns (bool);
 
-    function getProtocolRiskCategory(uint256 _protocolID, uint256 _version) external view returns (uint256);
+    function getProtocolRiskCategory(uint256 _protocolID) external view returns (uint256);
 
     function getLiquidationFactor(uint256 _riskPoolCategory, uint256 _version) external view returns(uint256);
 

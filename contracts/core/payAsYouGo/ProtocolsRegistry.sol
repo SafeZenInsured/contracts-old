@@ -23,6 +23,9 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
         uint256 protocolLiquidity;
         uint256 coverageOffered;
         uint256 streamFlowRate;
+        uint256 currentRiskPoolCategory;
+        uint256 currentRiskFactor;
+        bool currentlyIsCommunityGoverned;
     }
 
     mapping (uint256 => ProtocolInfo) public ProtocolInfos;
@@ -69,7 +72,7 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
     function liquidatePositions(uint256 _riskPoolCategory, uint256 _liquidatedPercent) external onlyOwner {
         GlobalProtocolsInfo[_riskPoolCategory][version].liquidation = _liquidatedPercent;
         for (uint i = 0; i <= protocolID; i++) {
-            if (protocolsVersionableInfo[i][version].riskPoolCategory == _riskPoolCategory) {
+            if (ProtocolInfos[i].currentRiskPoolCategory == _riskPoolCategory) {
                 ProtocolInfos[i].protocolLiquidity = ((ProtocolInfos[i].protocolLiquidity * _liquidatedPercent)/100);
             }
         }
@@ -116,13 +119,11 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
         uint256 _coverageAmount,
         uint256 _incomingFlowRate
     ) external override {
-        uint256 _riskPoolCategory = protocolsVersionableInfo[_protocolID][version].riskPoolCategory;
+        uint256 _riskPoolCategory = ProtocolInfos[_protocolID].currentRiskPoolCategory;
         GlobalProtocolsInfo[_riskPoolCategory][version].endTime = block.timestamp;
         uint256 previousIncomingFlowRate = GlobalProtocolsInfo[_riskPoolCategory][version].globalIncomingStreamFlowRate;
         version ++;
-        uint256 SZTTokenCounter = buySellSZT.getSZTTokenCount();
-        (, uint256 amountCoveredInDAI) = buySellSZT.calculateSZTPrice((SZTTokenCounter - _coverageAmount), SZTTokenCounter);
-        ProtocolInfos[_protocolID].coverageOffered += amountCoveredInDAI;
+        ProtocolInfos[_protocolID].coverageOffered += _coverageAmount;
         GlobalProtocolsInfo[_riskPoolCategory][version].startTime = block.timestamp;
         GlobalProtocolsInfo[_riskPoolCategory][version].globalIncomingStreamFlowRate = previousIncomingFlowRate + _incomingFlowRate;
     }
@@ -132,13 +133,11 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
         uint256 _coverageAmount, 
         uint256 _incomingFlowRate
     ) external {
-        uint256 _riskPoolCategory = protocolsVersionableInfo[_protocolID][version].riskPoolCategory;
+        uint256 _riskPoolCategory = ProtocolInfos[_protocolID].currentRiskPoolCategory;
         GlobalProtocolsInfo[_riskPoolCategory][version].endTime = block.timestamp;
         uint256 previousIncomingFlowRate = GlobalProtocolsInfo[_riskPoolCategory][version].globalIncomingStreamFlowRate;
         version ++;
-        uint256 SZTTokenCounter = buySellSZT.getSZTTokenCount();
-        (, uint256 amountCoveredInDAI) = buySellSZT.calculateSZTPrice(SZTTokenCounter, (SZTTokenCounter +  _coverageAmount));
-        ProtocolInfos[_protocolID].coverageOffered -= amountCoveredInDAI;
+        ProtocolInfos[_protocolID].coverageOffered -= _coverageAmount;
         GlobalProtocolsInfo[_riskPoolCategory][version].startTime = block.timestamp;
         GlobalProtocolsInfo[_riskPoolCategory][version].globalIncomingStreamFlowRate = previousIncomingFlowRate - _incomingFlowRate;
     }
@@ -147,26 +146,30 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
         uint256 _protocolID, 
         uint256 _liquiditySupplied
     ) external {
-        uint256 _riskPoolCategory = protocolsVersionableInfo[_protocolID][version].riskPoolCategory;
+        uint256 _riskPoolCategory = ProtocolInfos[_protocolID].currentRiskPoolCategory;
         GlobalProtocolsInfo[_riskPoolCategory][version].endTime = block.timestamp;
         uint256 previousLiquiditySupplied = GlobalProtocolsInfo[_riskPoolCategory][version].globalProtocolLiquidity;
         version ++;
-        ProtocolInfos[_protocolID].protocolLiquidity += _liquiditySupplied;
+        uint256 SZTTokenCounter = buySellSZT.getSZTTokenCount();
+        (, uint256 amountCoveredInDAI) = buySellSZT.calculateSZTPrice((SZTTokenCounter - _liquiditySupplied), SZTTokenCounter);
+        ProtocolInfos[_protocolID].protocolLiquidity += amountCoveredInDAI;
         GlobalProtocolsInfo[_riskPoolCategory][version].startTime = block.timestamp;
-        GlobalProtocolsInfo[_riskPoolCategory][version].globalProtocolLiquidity = previousLiquiditySupplied + _liquiditySupplied;
+        GlobalProtocolsInfo[_riskPoolCategory][version].globalProtocolLiquidity = previousLiquiditySupplied + amountCoveredInDAI;
     }
 
     function removeProtocolLiquidation(
         uint256 _protocolID, 
         uint256 _liquiditySupplied
     ) external {
-        uint256 _riskPoolCategory = protocolsVersionableInfo[_protocolID][version].riskPoolCategory;
+        uint256 _riskPoolCategory = ProtocolInfos[_protocolID].currentRiskPoolCategory;
         GlobalProtocolsInfo[_riskPoolCategory][version].endTime = block.timestamp;
         uint256 previousLiquiditySupplied = GlobalProtocolsInfo[_riskPoolCategory][version].globalProtocolLiquidity;
         version ++;
-        ProtocolInfos[_protocolID].protocolLiquidity -= _liquiditySupplied;
+        uint256 SZTTokenCounter = buySellSZT.getSZTTokenCount();
+        (, uint256 amountCoveredInDAI) = buySellSZT.calculateSZTPrice(SZTTokenCounter, (SZTTokenCounter +  _liquiditySupplied));
+        ProtocolInfos[_protocolID].protocolLiquidity -= amountCoveredInDAI;
         GlobalProtocolsInfo[_riskPoolCategory][version].startTime = block.timestamp;
-        GlobalProtocolsInfo[_riskPoolCategory][version].globalProtocolLiquidity = previousLiquiditySupplied - _liquiditySupplied;
+        GlobalProtocolsInfo[_riskPoolCategory][version].globalProtocolLiquidity = previousLiquiditySupplied - amountCoveredInDAI;
     }
 
     event RequestAddNewProtocol(string indexed _protocolName, address indexed _protocolAddress);
@@ -190,6 +193,9 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
         protocolInfo.protocolLiquidity = 0;
         protocolInfo.coverageOffered = 0;
         protocolInfo.streamFlowRate = _streamFlowRate;
+        protocolInfo.currentRiskFactor =_riskFactor;
+        protocolInfo.currentRiskPoolCategory = _riskPoolCategory;
+        protocolInfo.currentlyIsCommunityGoverned = _isCommunityGoverned;
         ProtocolVersionableInfo storage protocolVersionableInfo = protocolsVersionableInfo[protocolID][version];
         protocolVersionableInfo.isUpdated = true;
         protocolVersionableInfo.riskFactor = _riskFactor;
@@ -214,13 +220,14 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
         GlobalProtocolsInfo[_riskPoolCategory][version].globalProtocolLiquidity += ProtocolInfos[_protocolID].protocolLiquidity;
         GlobalProtocolsInfo[beforeRiskPoolCategory][version].globalProtocolLiquidity -= ProtocolInfos[_protocolID].protocolLiquidity;
         protocolsVersionableInfo[protocolID][version].isUpdated = true;
+        ProtocolInfos[_protocolID].currentRiskPoolCategory = _riskPoolCategory;
     }
 
     function ifProtocolUpdated(uint256 _protocolID, uint256 _version) external view returns (bool) {
         return protocolsVersionableInfo[_protocolID][_version].isUpdated;
     }
 
-    function getProtocolRiskCategory(uint256 _protocolID, uint256 _version) external view returns (uint256) {
-        return protocolsVersionableInfo[_protocolID][_version].riskPoolCategory;
+    function getProtocolRiskCategory(uint256 _protocolID) external view override returns (uint256) {
+        return ProtocolInfos[_protocolID].currentRiskPoolCategory;
     }
 }
