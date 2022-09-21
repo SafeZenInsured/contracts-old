@@ -214,7 +214,7 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
     }
 
     function updateProtocolRiskPoolCategory(uint256 _protocolID, uint256 _riskPoolCategory) external onlyOwner {
-        uint256 beforeRiskPoolCategory = protocolsVersionableInfo[protocolID][version].riskPoolCategory;
+        uint256 beforeRiskPoolCategory = ProtocolInfos[_protocolID].currentRiskPoolCategory;
         version ++;
         protocolsVersionableInfo[protocolID][version].riskPoolCategory = _riskPoolCategory;
         GlobalProtocolsInfo[_riskPoolCategory][version].globalProtocolLiquidity += ProtocolInfos[_protocolID].protocolLiquidity;
@@ -229,5 +229,9 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
 
     function getProtocolRiskCategory(uint256 _protocolID) external view override returns (uint256) {
         return ProtocolInfos[_protocolID].currentRiskPoolCategory;
+    }
+
+    function getProtocolVersionRiskCategory(uint256 _protocolID, uint256 _version) external view returns(uint256) {
+        return protocolsVersionableInfo[_protocolID][_version].riskPoolCategory;
     }
 }

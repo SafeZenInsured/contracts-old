@@ -7,14 +7,11 @@ import "./../../../interfaces/IERC20Extended.sol";
 
 contract SwapDAI is Ownable{
 
-    IERC20 private DAI;
-    IERC20Extended private sztDAI;
+    IERC20 private immutable DAI;
+    IERC20Extended private immutable sztDAI;
 
-    function updateDAIAddress(address _DAIAddress) external onlyOwner {
-        DAI = IERC20(_DAIAddress);
-    }
-
-    function updatesztDAIAddress(address _sztDAIAddress) external onlyOwner {
+    constructor(address _DAIaddress, address _sztDAIAddress) {
+        DAI = IERC20(_DAIaddress);
         sztDAI = IERC20Extended(_sztDAIAddress);
     }
 

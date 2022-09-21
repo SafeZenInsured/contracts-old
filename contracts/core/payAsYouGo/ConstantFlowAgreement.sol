@@ -62,24 +62,28 @@ contract ConstantFlowAgreement is Ownable, ICFA{
     error ProtocolNotActiveError();
     error NotEvenMinimumInsurancePeriodAmount();
     error ActiveInsuranceExistError();
+    error InsuranceCoverNotAvailableError();
     /// @param _insuredAmount: insured amount
     /// @param _protocolID: like AAVE which a user want cover against
     function activateInsurance(uint256 _insuredAmount, uint256 _protocolID) public override {
+        if (_insuredAmount < 1e18) {
+            revert InsuranceCoverNotAvailableError();
+        }
         if (
             (!protocolRegistry.ifEnoughLiquidity(_insuredAmount, _protocolID))    
         ) {
             revert ProtocolNotActiveError();
         }
-        if (usersInsuranceInfo[_msgSender()][_protocolID].isValid) {
-            revert ActiveInsuranceExistError();
-        }
+        // if (usersInsuranceInfo[_msgSender()][_protocolID].isValid) {
+        //     revert ActiveInsuranceExistError();
+        // }
         uint256[] memory activeID = findActiveFlows(_msgSender(), protocolRegistry.protocolID());
         uint256 userEstimatedBalance = sztDAI.balanceOf(_msgSender()) - calculateTotalFlowMade(_msgSender(), activeID);
-        uint256 flowRate = protocolRegistry.getStreamFlowRate(_protocolID) * _insuredAmount;
+        uint256 flowRate = ((protocolRegistry.getStreamFlowRate(_protocolID) * _insuredAmount) / 1e18);
         UserGlobalInsuranceInfo storage userGlobalInsuranceInfo = usersGlobalInsuranceInfo[_msgSender()];
         userGlobalInsuranceInfo.insuranceStreamRate += flowRate;
         // user balance should be enough to run the insurance for atleast minimum insurance time duration
-        if ((userGlobalInsuranceInfo.insuranceStreamRate * (minimumInsurancePeriod * 1 minutes)) >= userEstimatedBalance) {
+        if (((userGlobalInsuranceInfo.insuranceStreamRate * minimumInsurancePeriod) / 60) >= userEstimatedBalance) {
             revert NotEvenMinimumInsurancePeriodAmount();
         }
         uint256 validTill = ((userEstimatedBalance / userGlobalInsuranceInfo.insuranceStreamRate) * 1 minutes);
@@ -92,7 +96,7 @@ contract ConstantFlowAgreement is Ownable, ICFA{
         UserInsuranceInfo storage userInsuranceInfo = usersInsuranceInfo[_msgSender()][_protocolID];
         userInsuranceInfo.insuredAmount = _insuredAmount;
         userInsuranceInfo.insuranceFlowRate = flowRate;
-        userInsuranceInfo.startTime = block.timestamp + (startWaitingTime * 1 hours);
+        userInsuranceInfo.startTime = block.timestamp + startWaitingTime;
         userInsuranceInfo.validTill = userGlobalInsuranceInfo.validTill;
         userInsuranceInfo.isValid = true;
         protocolRegistry.addCoverageOffered(_protocolID, _insuredAmount, flowRate);

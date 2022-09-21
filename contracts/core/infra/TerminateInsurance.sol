@@ -29,7 +29,7 @@ contract TerminateInsurance is OpsReady, Ownable, Pausable {
         _;
     }
 
-    function gelatoSpecificProtocolStopFlow(address _userAddress, uint256 _protocolID) external onlyOps whenNotPaused {
+    function gelatoSpecificProtocolStopFlow(address _userAddress, uint256 _protocolID) external onlyOps whenNotPaused payable {
         stopSpecificProtocolCFAFlow(_userAddress, _protocolID);
         (uint256 feeAmount, ) = IOps(ops).getFeeDetails();
         _payTxFee(feeAmount);
@@ -46,7 +46,7 @@ contract TerminateInsurance is OpsReady, Ownable, Pausable {
         _CFA.closeTokenStream(_userAddress, _protocolID);
     }
 
-    function createGelatoProtocolSpecificTask(address _userAddress, uint256 _protocolID) external onlyCFA {
+    function createGelatoProtocolSpecificTask(address _userAddress, uint256 _protocolID) external payable onlyCFA {
         bytes4 _execSelector = bytes4(
             abi.encodeWithSignature("gelatoSpecificProtocolStopFlow()")
         );

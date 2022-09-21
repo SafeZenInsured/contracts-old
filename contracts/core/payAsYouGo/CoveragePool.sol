@@ -2,7 +2,6 @@
 pragma solidity ^0.8.0;
 
 import "./../../dependencies/openzeppelin/Ownable.sol";
-import "./../../../interfaces/ISZTStaking.sol";
 import "./../../../interfaces/IBuySellSZT.sol";
 import "./../../../interfaces/ICoveragePool.sol";
 import "./../../../interfaces/IERC20.sol";
@@ -49,12 +48,13 @@ contract CoveragePool is Ownable, ICoveragePool {
     mapping(address => mapping(uint256 => UserInfo)) private usersInfo;
 
     error NotAMinimumPoolAmountError();
+    /// NOTE: With transferSZT, you'll need to approve SZT and GSZT tokens
     function underwrite(uint256 _value, uint256 _protocolID) public override returns(bool) {
         if (_value < minCoveragePoolAmount) {
             revert NotAMinimumPoolAmountError();
         }
-        uint256 currVersion = protocolsRegistry.version();
         protocolsRegistry.addProtocolLiquidation(_protocolID, _value); // first this, then underwriterBalance
+        uint256 currVersion = protocolsRegistry.version();
         underwritersBalance[_msgSender()][_protocolID][currVersion].depositedAmount = _value;
         totalTokensStaked += _value;
         if (!usersInfo[_msgSender()][_protocolID].isActiveInvested) {
@@ -118,7 +118,6 @@ contract CoveragePool is Ownable, ICoveragePool {
         return false;
     }
 
-    // public for testing otherwise internal call
     function calculateUserBalance(uint256 _protocolID) public view returns(uint256) {
         uint256 userBalance;
         uint256 userStartVersion = usersInfo[_msgSender()][_protocolID].startVersionBlock;
@@ -130,7 +129,7 @@ contract CoveragePool is Ownable, ICoveragePool {
             uint256 userVersionDepositedBalance = underwritersBalance[_msgSender()][_protocolID][i].depositedAmount;
             uint256 userVersionWithdrawnBalance = underwritersBalance[_msgSender()][_protocolID][i].withdrawnAmount;
             if (protocolsRegistry.ifProtocolUpdated(_protocolID, i)) {
-                riskPoolCategory = protocolsRegistry.getProtocolRiskCategory(_protocolID, i);
+                riskPoolCategory = protocolsRegistry.getProtocolVersionRiskCategory(_protocolID, i);
             }
             if (protocolsRegistry.getEarnedPremiumFlowRate(riskPoolCategory, i) != premiumEarnedFlowRate) {
                 premiumEarnedFlowRate = protocolsRegistry.getEarnedPremiumFlowRate(riskPoolCategory, i);

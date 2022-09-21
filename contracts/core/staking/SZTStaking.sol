@@ -100,4 +100,8 @@ contract SZTStaking is Ownable, ISZTStaking {
         }
         return false;
     }
+
+    function getUserBalance(address userAddress) external view override returns(uint256) {
+        return stakers[userAddress].amountStaked;
+    }
 }
