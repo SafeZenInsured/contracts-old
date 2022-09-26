@@ -9,6 +9,8 @@ import "./../ZPController.sol";
 
 /// Report any bug or issues at:
 /// @custom:security-contact anshik@safezen.finance
+
+// TODO: ADDING EVENTS
 contract AAVE is Ownable, IAAVEImplementation {
     IAAVE LendAAVE;  // AAVE v3 Supply and Withdraw Interface
     ZPController zpController;  // Zero Premium Controller Interface
@@ -60,13 +62,16 @@ contract AAVE is Ownable, IAAVEImplementation {
 
     /// @dev minting function for testnet purposes
     /// @param tokenAddress: token address of the supplied token to AAVE v3 pool
+    /// @param amount: amount of the tokens to be minted
     function mintERC20Tokens(address tokenAddress, uint256 amount) public override {
         IAAVEERC20(tokenAddress).mint(msg.sender, amount);
     }
 
-    // supply function under the hood calls transferFrom function,
-    // so token to be supplied should be approved.
     error LowSupplyAmountError();
+    /// @dev supply function to supply token to the AAVE v3 Pool
+    /// @param _tokenAddress: token address of the supplied token, e.g. DAI
+    /// @param _rewardTokenAddress: token address of the received token, e.g. aDAI
+    /// @param _amount: amount of the tokens supplied
     function supplyToken(address _tokenAddress, address _rewardTokenAddress, uint256 _amount) external override {
         if (_amount < 1e10) {
             revert LowSupplyAmountError();
@@ -85,6 +90,10 @@ contract AAVE is Ownable, IAAVEImplementation {
         
     }
 
+    /// @dev to withdraw the tokens from the AAVE v3 lending pool
+    /// @param _tokenAddress: token address of the supplied token, e.g. DAI
+    /// @param _rewardTokenAddress: token address of the received token, e.g. aDAI
+    /// @param _amount: amount of the tokens to be withdrawn
     function withdrawToken(address _tokenAddress, address _rewardTokenAddress, uint256 _amount) external override {
         uint256 userBalance = calculateUserBalance(_rewardTokenAddress);
         if (userBalance >= _amount) {
@@ -98,7 +107,8 @@ contract AAVE is Ownable, IAAVEImplementation {
         }        
     }
     
-    // public for testing otherwise internal call
+    /// @dev calculates the user balance
+    /// @param _rewardTokenAddress: token address of the token received, e.g. aDAI
     function calculateUserBalance(address _rewardTokenAddress) public view override returns(uint256) {
         uint256 userBalance;
         uint256 userStartVersion = usersInfo[_msgSender()][_rewardTokenAddress].startVersionBlock;
@@ -120,5 +130,4 @@ contract AAVE is Ownable, IAAVEImplementation {
         userBalance -= usersInfo[_msgSender()][_rewardTokenAddress].withdrawnBalance;
         return userBalance;
     }
-
 }
