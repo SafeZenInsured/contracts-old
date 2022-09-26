@@ -10,20 +10,28 @@ import "./../ZPController.sol";
 /// Report any bug or issues at:
 /// @custom:security-contact anshik@safezen.finance
 contract AAVE is Ownable, IAAVEImplementation {
-    IAAVE LendAAVE;
-    ZPController zpController;
-    uint256 protocolID;
+    IAAVE LendAAVE;  // AAVE v3 Supply and Withdraw Interface
+    ZPController zpController;  // Zero Premium Controller Interface
+    uint256 protocolID;  // Unique Protocol ID
 
+    /// @dev: Struct storing the user info
+    /// @param isActiveInvested: checks if the user has already deposited funds in AAVE via us
+    /// @param startVersionBlock: keeps a record with which version user started using our protocol
+    /// @param withdrawnBalance: keeps a record of the amount the user has withdrawn
     struct UserInfo {
         bool isActiveInvested;
         uint256 startVersionBlock;
         uint256 withdrawnBalance;
     }
 
-    /// User Address => Reward Token Address => Version => UserTransactionInfo
+    /// Maps --> User Address => Reward Token Address => Version => UserTransactionInfo
     mapping(address => mapping(address => mapping(uint256 => uint256))) private userTransactionInfo;
+    /// Maps --> User Address => Reward Token Address => UserInfo struct
     mapping(address => mapping(address => UserInfo)) private usersInfo;
 
+    /// @dev initializing contract with AAVE v3 lending pool address and Zero Premium controller address
+    /// @param _lendingAddress: AAVE v3 lending address
+    /// @param _controllerAddress: Zero Premium Controller address
     constructor(
         address _lendingAddress, 
         address _controllerAddress
@@ -32,7 +40,13 @@ contract AAVE is Ownable, IAAVEImplementation {
         zpController = ZPController(_controllerAddress);
     }
 
-    /// Initialize this function first before running any other function
+    /// @dev Initialize this function first before running any other function
+    /// @dev Registers the AAVE protocol in the Zero Premium Controller protocol list
+    /// @param _protocolName: name of the protocol: AAVE
+    /// @param _deployedAddress: address of the AAVE lending pool
+    /// @param _isCommunityGoverned: checks if the protocol is community governed or not
+    /// @param _riskFactor: registers the risk score of AAVE; 0 being lowest, and 100 being highest
+    /// @param _riskPoolCategory: registers the risk pool category; 1 - low, 2-medium, and 3- high risk
     function addAAVEProtocolInfo(
         string memory _protocolName,
         address _deployedAddress,
@@ -44,7 +58,8 @@ contract AAVE is Ownable, IAAVEImplementation {
         zpController.addCoveredProtocol(_protocolName, _deployedAddress, _isCommunityGoverned, _riskFactor, _riskPoolCategory);
     } 
 
-    /// for testnet purposes
+    /// @dev minting function for testnet purposes
+    /// @param tokenAddress: token address of the supplied token to AAVE v3 pool
     function mintERC20Tokens(address tokenAddress, uint256 amount) public override {
         IAAVEERC20(tokenAddress).mint(msg.sender, amount);
     }
