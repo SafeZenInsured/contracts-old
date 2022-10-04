@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity ^0.8.0;
+pragma solidity 0.8.17;
 
 import "./../../dependencies/openzeppelin/Ownable.sol";
 import "./../../../interfaces/IBuySellSZT.sol";
@@ -12,7 +12,7 @@ contract CoveragePool is Ownable, ICoveragePool {
     uint256 public minCoveragePoolAmount;
     IBuySellSZT public buySellContract;
     IERC20 public SZTToken;
-    uint256 public totalTokensStaked;
+    uint256 public override totalTokensStaked;
     IProtocolsRegistry public protocolsRegistry;
 
     constructor(address _buySellAddress, address _SZTTokenAddress) {
@@ -118,7 +118,7 @@ contract CoveragePool is Ownable, ICoveragePool {
         return false;
     }
 
-    function calculateUserBalance(uint256 _protocolID) public view returns(uint256) {
+    function calculateUserBalance(uint256 _protocolID) public view override returns(uint256) {
         uint256 userBalance;
         uint256 userStartVersion = usersInfo[_msgSender()][_protocolID].startVersionBlock;
         uint256 currVersion =  protocolsRegistry.version();

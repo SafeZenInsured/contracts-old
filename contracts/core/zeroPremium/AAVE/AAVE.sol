@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity ^0.8.0;
+pragma solidity 0.8.17;
 
 import "./../../../../interfaces/AAVE/IAAVE.sol"; // aave contracts to supply and borrow
 import "./../../../../interfaces/AAVE/IAAVEERC20.sol"; 
@@ -87,7 +87,6 @@ contract AAVE is Ownable, IAAVEImplementation {
             usersInfo[_msgSender()][_rewardTokenAddress].startVersionBlock = currVersion;
             usersInfo[_msgSender()][_rewardTokenAddress].isActiveInvested = true;
         }
-        
     }
 
     /// @dev to withdraw the tokens from the AAVE v3 lending pool

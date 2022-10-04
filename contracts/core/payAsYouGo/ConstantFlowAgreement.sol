@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity ^0.8.0;
+pragma solidity 0.8.17;
 
 import "./../../dependencies/openzeppelin/Ownable.sol";
+import "./../../dependencies/openzeppelin/Pausable.sol";
 import "./../../../interfaces/IERC20.sol";
 import "./../../../interfaces/IERC20Extended.sol";
 import "./../../../interfaces/ICFA.sol";
@@ -11,7 +12,7 @@ import "./../../../interfaces/IProtocolsRegistry.sol";
 
 /// Report any bug or issues at:
 /// @custom:security-contact anshik@safezen.finance
-contract ConstantFlowAgreement is Ownable, ICFA{
+contract ConstantFlowAgreement is Ownable, ICFA, Pausable {
     IProtocolsRegistry private protocolRegistry;
     IERC20 private DAI;
     IERC20Extended private sztDAI;
@@ -35,29 +36,53 @@ contract ConstantFlowAgreement is Ownable, ICFA{
 
     /// @dev collects user information for each protocol ID
     /// @param insuranceFlowRate: amount to be charged per second [protocol flow rate * amount insured]
+    /// @param registrationTime: insurance registration time for each protocol ID
     /// @param startTime: insurance activation time for each protocol ID
     /// @param validTill: insurance validation till date
     /// @param isValid: checks whether user is having active insurance or not
     struct UserInsuranceInfo {
         uint256 insuredAmount;
         uint256 insuranceFlowRate;
+        uint256 registrationTime;
         uint256 startTime;
         uint256 validTill;
         bool isValid;
+        bool gelatoCallMade;
     }
     
     // userAddress -> protocolID -> UserInsuranceInfo
     mapping(address => mapping(uint256 => UserInsuranceInfo)) private usersInsuranceInfo;
 
+    function getUserInsuranceInfo(
+        address _userAddress, 
+        uint256 _protocolID
+        ) external view returns(uint256, uint256, uint256, uint256, uint256, bool, bool) {
+        UserInsuranceInfo memory userInsuranceInfo = usersInsuranceInfo[_userAddress][_protocolID];
+        return (
+            userInsuranceInfo.insuredAmount, 
+            userInsuranceInfo.insuranceFlowRate,
+            userInsuranceInfo.registrationTime,
+            userInsuranceInfo.startTime,
+            userInsuranceInfo.validTill,
+            userInsuranceInfo.isValid,
+            userInsuranceInfo.gelatoCallMade);
+    }
+
     struct UserGlobalInsuranceInfo {
         uint256 insuranceStreamRate;
         uint256 validTill;
     }
-    mapping (address => UserGlobalInsuranceInfo) private usersGlobalInsuranceInfo;
+    /// NOTE: made public for testing purposes
+    mapping (address => UserGlobalInsuranceInfo) public usersGlobalInsuranceInfo;
 
-    uint256 minimumInsurancePeriod = 120 minutes; // [in minutes]
-    uint256 maxInsuredDays = 90 days; // max. insurance period [in days]
-    uint256 startWaitingTime = 8 hours; // insurance active after given waiting period
+    function getGlobalUserInsuranceInfo(address _userAddress) external view returns (uint256, uint256) {
+        UserGlobalInsuranceInfo memory userGlobalInsuranceInfo = usersGlobalInsuranceInfo[_userAddress];
+        return (userGlobalInsuranceInfo.insuranceStreamRate, userGlobalInsuranceInfo.validTill);
+    }
+
+    uint256 minimumInsurancePeriod = 30; // [in minutes] // 120 minutes to be default
+    uint256 maxInsuredDays = 1 days; // max. insurance period [in days] // 90 days to be default
+    uint256 startWaitingTime = 2 minutes; // insurance active after given waiting period // 8 hours to be default
     
     error ProtocolNotActiveError();
     error NotEvenMinimumInsurancePeriodAmount();
@@ -74,16 +99,16 @@ contract ConstantFlowAgreement is Ownable, ICFA{
         ) {
             revert ProtocolNotActiveError();
         }
-        // if (usersInsuranceInfo[_msgSender()][_protocolID].isValid) {
-        //     revert ActiveInsuranceExistError();
-        // }
+        if (usersInsuranceInfo[_msgSender()][_protocolID].isValid) {
+            revert ActiveInsuranceExistError();
+        }
         uint256[] memory activeID = findActiveFlows(_msgSender(), protocolRegistry.protocolID());
         uint256 userEstimatedBalance = sztDAI.balanceOf(_msgSender()) - calculateTotalFlowMade(_msgSender(), activeID);
         uint256 flowRate = ((protocolRegistry.getStreamFlowRate(_protocolID) * _insuredAmount) / 1e18);
         UserGlobalInsuranceInfo storage userGlobalInsuranceInfo = usersGlobalInsuranceInfo[_msgSender()];
         userGlobalInsuranceInfo.insuranceStreamRate += flowRate;
         // user balance should be enough to run the insurance for atleast minimum insurance time duration
-        if (((userGlobalInsuranceInfo.insuranceStreamRate * minimumInsurancePeriod) / 60) >= userEstimatedBalance) {
+        if ((userGlobalInsuranceInfo.insuranceStreamRate * minimumInsurancePeriod) >= userEstimatedBalance) {
             revert NotEvenMinimumInsurancePeriodAmount();
         }
         uint256 validTill = ((userEstimatedBalance / userGlobalInsuranceInfo.insuranceStreamRate) * 1 minutes);
@@ -96,11 +121,15 @@ contract ConstantFlowAgreement is Ownable, ICFA{
         UserInsuranceInfo storage userInsuranceInfo = usersInsuranceInfo[_msgSender()][_protocolID];
         userInsuranceInfo.insuredAmount = _insuredAmount;
         userInsuranceInfo.insuranceFlowRate = flowRate;
+        userInsuranceInfo.registrationTime = block.timestamp;
         userInsuranceInfo.startTime = block.timestamp + startWaitingTime;
         userInsuranceInfo.validTill = userGlobalInsuranceInfo.validTill;
         userInsuranceInfo.isValid = true;
         protocolRegistry.addCoverageOffered(_protocolID, _insuredAmount, flowRate);
-        terminateInsurance.createGelatoProtocolSpecificTask(_msgSender(), _protocolID);
+        if (!userInsuranceInfo.gelatoCallMade) {
+            // terminateInsurance.createGelatoProtocolSpecificTask(_msgSender(), _protocolID);
+            userInsuranceInfo.gelatoCallMade = true;
+        }
     }
 
     error InactiveInsuranceError();
@@ -122,40 +151,44 @@ contract ConstantFlowAgreement is Ownable, ICFA{
         activateInsurance(newInsuredAmount, _protocolID);
     }
 
-    function closeAllStream(address _userAddress) public override {
+    function closeAllStream(address _userAddress) public override returns(bool) {
         uint256[] memory activeID = findActiveFlows(_msgSender(), protocolRegistry.protocolID());
         uint256 expectedAmountToBePaid = calculateTotalFlowMade(_userAddress, activeID);
         for (uint256 i=0; i < activeID.length; i++) {
             usersInsuranceInfo[_msgSender()][activeID[i]].isValid = false;
+            uint256 flowRate = usersInsuranceInfo[_msgSender()][activeID[i]].insuranceFlowRate;
+            uint256 insuredAmount = usersInsuranceInfo[_msgSender()][activeID[i]].insuredAmount;
+            protocolRegistry.removeCoverageOffered(activeID[i], insuredAmount, flowRate);
         }
         usersGlobalInsuranceInfo[_msgSender()].insuranceStreamRate = 0;
         uint256 userBalance = sztDAI.balanceOf(_userAddress); 
         uint256 amountToBeBurned = expectedAmountToBePaid > userBalance ? userBalance : expectedAmountToBePaid;
         bool success = sztDAI.burnFrom(_userAddress, amountToBeBurned);
-        if (!success){
-            revert TransactionFailed();
-        }
+        return success;
     }
 
+    /// NOTE: few if and else to consider for globalinsuranceinfo like endtime and start time 
     error TransactionFailed();
     error NoStreamRunningError();
-    function closeTokenStream(address _userAddress, uint256 protocolID) public override {
+    function closeTokenStream(address _userAddress, uint256 protocolID) public override returns(bool) {
         UserInsuranceInfo storage userInsuranceInfo = usersInsuranceInfo[_userAddress][protocolID];
         if (userInsuranceInfo.isValid) {
             userInsuranceInfo.isValid = false;
             uint256 userBalance = sztDAI.balanceOf(_userAddress);
-            uint256 duration = (block.timestamp - userInsuranceInfo.startTime);
+            uint256 duration = (block.timestamp > userInsuranceInfo.startTime) ? (block.timestamp - userInsuranceInfo.startTime) : 0;
             uint256 expectedAmountToBePaid = (duration * userInsuranceInfo.insuranceFlowRate);
-            uint256 amountToBeBurned = expectedAmountToBePaid > userBalance ? userBalance : expectedAmountToBePaid;
+            if (expectedAmountToBePaid == 0) {
+                return true;
+            } 
+            uint256 amountToBeBurned = (expectedAmountToBePaid > userBalance) ? userBalance : expectedAmountToBePaid;
             usersGlobalInsuranceInfo[_userAddress].insuranceStreamRate -= userInsuranceInfo.insuranceFlowRate;
+            uint256 flowRate = userInsuranceInfo.insuranceFlowRate;
+            uint256 insuredAmount = userInsuranceInfo.insuredAmount;
+            protocolRegistry.removeCoverageOffered(protocolID, insuredAmount, flowRate);
             bool success = sztDAI.burnFrom(_userAddress, amountToBeBurned);
-            if (!success){
-                revert TransactionFailed();
-            }
+            return success;
         }
-        else {
-            revert NoStreamRunningError();
-        }
+        return false;
     }
 
     error LowUserBalance();
@@ -176,7 +209,7 @@ contract ConstantFlowAgreement is Ownable, ICFA{
 
     /// VIEW FUNCTIONS
 
-    function findActiveFlows(address _userAddress, uint256 protocolCount) public view  returns(uint256[] memory) {
+    function findActiveFlows(address _userAddress, uint256 protocolCount) public view override returns(uint256[] memory) {
         uint256 activeProtocolCount;
         for (uint i = 0; i < protocolCount; i++) {
           UserInsuranceInfo memory userInsuranceInfo = usersInsuranceInfo[_userAddress][i];
@@ -212,7 +245,7 @@ contract ConstantFlowAgreement is Ownable, ICFA{
         uint256 balanceToBePaid;
         for (uint256 i=0; i< _activeID.length; i++){
             UserInsuranceInfo storage userActiveInsuranceInfo = usersInsuranceInfo[_userAddress][_activeID[i]];
-            uint256 duration = (block.timestamp - userActiveInsuranceInfo.startTime);
+            uint256 duration = block.timestamp > userActiveInsuranceInfo.startTime ? block.timestamp - userActiveInsuranceInfo.startTime : 0;
             balanceToBePaid += (userActiveInsuranceInfo.insuranceFlowRate * duration);
         }
         return balanceToBePaid;

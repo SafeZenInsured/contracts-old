@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity ^0.8.0;
+pragma solidity 0.8.17;
 
 import "./../../dependencies/openzeppelin/Ownable.sol";
 import "./../../../interfaces/ISZTStaking.sol";
@@ -14,7 +14,7 @@ contract SZTStaking is Ownable, ISZTStaking {
     IBuySellSZT public buySellContract;
     IERC20 public SZTToken;
     IERC20 public GSZTToken;
-    uint256 public totalTokensStaked;
+    uint256 public override totalTokensStaked;
 
     constructor(address _buySellAddress, address _SZTTokenAddress) {
         buySellContract = IBuySellSZT(_buySellAddress);

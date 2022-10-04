@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity ^0.8.0;
+pragma solidity 0.8.17;
 
 import "./../../dependencies/openzeppelin/Ownable.sol";
 import "./../../dependencies/openzeppelin/Pausable.sol";
@@ -15,7 +15,6 @@ contract TerminateInsurance is OpsReady, Ownable, Pausable {
     uint256 public counter;
 
     mapping(address => mapping(uint256 => bytes32)) public taskID;
-    mapping(address => bytes32) public majorTaskID;
 
     constructor(address _ops) OpsReady(_ops) {
     }
@@ -47,13 +46,14 @@ contract TerminateInsurance is OpsReady, Ownable, Pausable {
     }
 
     function createGelatoProtocolSpecificTask(address _userAddress, uint256 _protocolID) external payable onlyCFA {
-        bytes4 _execSelector = bytes4(
-            abi.encodeWithSignature("gelatoSpecificProtocolStopFlow()")
-        );
-        bytes memory resolverData = abi.encodeWithSignature("gelatoResolver()");
+        // bytes4 _execSelector = bytes4(
+        //     abi.encodeWithSignature("gelatoSpecificProtocolStopFlow(address, uint256)", _userAddress, _protocolID)
+        // );
+        bytes memory resolverData = abi.encodeWithSignature("gelatoResolver(address, uint256)", _userAddress, _protocolID);
         taskID[_userAddress][_protocolID] = IOps(ops).createTaskNoPrepayment(
             address(this), 
-            _execSelector,
+            // _execSelector,
+            this.gelatoSpecificProtocolStopFlow.selector,
             address(this),
             resolverData,
             ETH
@@ -66,17 +66,13 @@ contract TerminateInsurance is OpsReady, Ownable, Pausable {
         IOps(ops).cancelTask(_taskID);
     }
 
-    function cancelGelatoTask(address _userAddress) external onlyCFA {
-        bytes32 _taskID = majorTaskID[_userAddress];
-        IOps(ops).cancelTask(_taskID);
-    }
-
-    function gelatoResolver()
+    function gelatoResolver(address _userAddress, uint256 _protocolID)
         external
-        pure
+        view
         returns (bool canExec, bytes memory execPayload)
     {
-        canExec = true;
+        canExec = (_CFA.getUserInsuranceValidTillInfo(_userAddress, _protocolID) <= block.timestamp) &&
+            (_CFA.getUserInsuranceStatus(_userAddress, _protocolID));
         execPayload = abi.encodeWithSignature("gelatoDistribute()");
     }
 

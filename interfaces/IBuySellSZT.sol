@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity 0.8.17;
 
 interface IBuySellSZT {
 
@@ -19,7 +19,7 @@ interface IBuySellSZT {
 
     function transferSZT(address _from, address _to, uint _value) external returns(bool);
 
-    function tokenCounter() external view returns(uint256);
+    function getTokenCounter() external view returns(uint256);
 
     function calculateSZTPrice(uint256 issuedSZTTokens, uint256 requiredTokens) view external returns(uint, uint);
 
