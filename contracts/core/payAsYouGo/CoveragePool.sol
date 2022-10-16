@@ -1,30 +1,27 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.17;
+pragma solidity 0.8.16;
 
 import "./../../dependencies/openzeppelin/Ownable.sol";
+import "./../../dependencies/openzeppelin/ReentrancyGuard.sol";
 import "./../../../interfaces/IBuySellSZT.sol";
 import "./../../../interfaces/ICoveragePool.sol";
 import "./../../../interfaces/IERC20.sol";
 import "./../../../interfaces/IProtocolsRegistry.sol";
 
 
-contract CoveragePool is Ownable, ICoveragePool {
-    uint256 public minCoveragePoolAmount;
-    IBuySellSZT public buySellContract;
-    IERC20 public SZTToken;
+contract CoveragePool is Ownable, ICoveragePool, ReentrancyGuard {
     uint256 public override totalTokensStaked;
-    IProtocolsRegistry public protocolsRegistry;
+    uint256 private _minCoveragePoolAmount = 1e19;
+    IERC20 private _tokenSZT;
+    IBuySellSZT private _buySellContract;
+    IProtocolsRegistry private _protocolsRegistry;
 
     constructor(address _buySellAddress, address _SZTTokenAddress) {
-        buySellContract = IBuySellSZT(_buySellAddress);
-        SZTToken = IERC20(_SZTTokenAddress);
+        _buySellContract = IBuySellSZT(_buySellAddress);
+        _tokenSZT = IERC20(_SZTTokenAddress);
     }
 
-    function updateProtocolsRegistry(address _protocolRegAddress) external onlyOwner {
-        protocolsRegistry = IProtocolsRegistry(_protocolRegAddress);
-    }
-
-    struct withdrawWaitPeriod{
+    struct WithdrawWaitPeriod{
         bool ifTimerStarted;
         uint256 SZTTokenCount;
         uint256 canWithdrawTime;
@@ -40,99 +37,124 @@ contract CoveragePool is Ownable, ICoveragePool {
         uint256 withdrawnAmount;
     }
 
+    /// record the amount of SZT tokens user has overall invested for underwriting
+    mapping (address => uint256) private userSZTPoolBalance;
+
+    /// record the user info, i.e. if the user has invested in a particular protocol
+    mapping(address => mapping(uint256 => UserInfo)) private usersInfo;
+
     // user address => protocol id => withdrawal wait period
-    mapping (address => mapping(uint256 => withdrawWaitPeriod)) private checkWaitTime;
+    mapping (address => mapping(uint256 => WithdrawWaitPeriod)) private checkWaitTime;
     // user address => protocol id => version => underwriterinfo
     mapping(address => mapping(uint256 => mapping(uint256 => BalanceInfo))) private underwritersBalance;
 
-    mapping(address => mapping(uint256 => UserInfo)) private usersInfo;
-
+    error TransactionFailedError();
     error NotAMinimumPoolAmountError();
+
+    function updateMinCoveragePoolAmount(uint256 valueInSZT) external onlyOwner {
+        _minCoveragePoolAmount = valueInSZT;
+    }
+
+    function updateProtocolsRegistry(address protocolRegAddress) external onlyOwner {
+        _protocolsRegistry = IProtocolsRegistry(protocolRegAddress);
+        emit UpdatedProtocolRegistryAddress(protocolRegAddress);
+    }
+
+    /// NOTE: waiting time to be updated in days, for demo in seconds
+    uint256 waitingTime = 20;
+    function updateWaitingPeriodTime(uint256 timeInDays) external onlyOwner {
+        waitingTime = timeInDays * 20 seconds;
+        emit UpdatedWaitingPeriod(timeInDays);
+    }
+
     /// NOTE: With transferSZT, you'll need to approve SZT and GSZT tokens
-    function underwrite(uint256 _value, uint256 _protocolID) public override returns(bool) {
-        if (_value < minCoveragePoolAmount) {
+    function underwrite(uint256 value, uint256 protocolID) public override nonReentrant returns(bool) {
+        if (value < _minCoveragePoolAmount) {
             revert NotAMinimumPoolAmountError();
         }
-        protocolsRegistry.addProtocolLiquidation(_protocolID, _value); // first this, then underwriterBalance
-        uint256 currVersion = protocolsRegistry.version();
-        underwritersBalance[_msgSender()][_protocolID][currVersion].depositedAmount = _value;
-        totalTokensStaked += _value;
-        if (!usersInfo[_msgSender()][_protocolID].isActiveInvested) {
-            usersInfo[_msgSender()][_protocolID].startVersionBlock = currVersion;
-            usersInfo[_msgSender()][_protocolID].isActiveInvested = true;
+        uint256 currVersion = _protocolsRegistry.version() + 1;
+        underwritersBalance[_msgSender()][protocolID][currVersion].depositedAmount = value;
+        totalTokensStaked += value;
+        if (!usersInfo[_msgSender()][protocolID].isActiveInvested) {
+            usersInfo[_msgSender()][protocolID].startVersionBlock = currVersion;
+            usersInfo[_msgSender()][protocolID].isActiveInvested = true;
         }
-        bool success = buySellContract.transferSZT(_msgSender(), address(this), _value);
-        return success;
-    }
-
-    /// NOTE: waiting time to be updated in days, temporary function
-    uint256 waitingTime = 20;
-    function updateWaitingPeriodTime(uint256 _timeInDays) external onlyOwner {
-        waitingTime = _timeInDays * 20 seconds;
+        userSZTPoolBalance[_msgSender()] += value;
+        bool success = _tokenSZT.transferFrom(_msgSender(), address(this), value);
+        bool addSuccess = _protocolsRegistry.addProtocolLiquidation(protocolID, value); 
+        if (success && addSuccess) {
+            emit UnderwritePool(_msgSender(), protocolID, value);
+            return true;
+        }
+        
+        return false;
     }
     
-    function activateWithdrawalTimer(uint256 _value, uint256 _protocolID) external override returns(bool) {
+    function activateWithdrawalTimer(uint256 value, uint256 protocolID) external override returns(bool) {
         if (
-            (!(checkWaitTime[_msgSender()][_protocolID].ifTimerStarted)) || 
-            (checkWaitTime[_msgSender()][_protocolID].SZTTokenCount < _value)
+            (!(checkWaitTime[_msgSender()][protocolID].ifTimerStarted)) || 
+            (checkWaitTime[_msgSender()][protocolID].SZTTokenCount < value)
         ) {
-            withdrawWaitPeriod storage waitingTimeCountdown = checkWaitTime[_msgSender()][_protocolID];
+            WithdrawWaitPeriod storage waitingTimeCountdown = checkWaitTime[_msgSender()][protocolID];
             waitingTimeCountdown.ifTimerStarted = true;
-            waitingTimeCountdown.SZTTokenCount = _value;
+            waitingTimeCountdown.SZTTokenCount = value;
             waitingTimeCountdown.canWithdrawTime = waitingTime + block.timestamp;
             return true;
         }
         return false;
     }
-
-    error TransactionFailedError();
-    function withdraw(uint256 _value, uint256 _protocolID) external override returns(bool) {
-        uint256 userBalance = calculateUserBalance(_protocolID);
+    
+    function withdraw(uint256 value, uint256 protocolID) external override nonReentrant returns(bool) {
+        uint256 userBalance = calculateUserBalance(protocolID);
         if (
-            (userBalance < _value) || 
-            (block.timestamp < checkWaitTime[_msgSender()][_protocolID].canWithdrawTime) || 
-            (_value > checkWaitTime[_msgSender()][_protocolID].SZTTokenCount)
+            (userBalance < value) || 
+            (block.timestamp < checkWaitTime[_msgSender()][protocolID].canWithdrawTime) || 
+            (value > checkWaitTime[_msgSender()][protocolID].SZTTokenCount)
         ) {
             revert TransactionFailedError();
         }
-        uint256 currVersion = protocolsRegistry.version();
-        protocolsRegistry.removeProtocolLiquidation(_protocolID, _value);
-        underwritersBalance[_msgSender()][_protocolID][currVersion].withdrawnAmount += _value;
-        checkWaitTime[_msgSender()][_protocolID].SZTTokenCount -= _value;
-        if (checkWaitTime[_msgSender()][_protocolID].SZTTokenCount == _value) {
-            checkWaitTime[_msgSender()][_protocolID].ifTimerStarted = false;
+        uint256 currVersion = _protocolsRegistry.version();
+        underwritersBalance[_msgSender()][protocolID][currVersion].withdrawnAmount += value;
+        checkWaitTime[_msgSender()][protocolID].SZTTokenCount -= value;
+        if (checkWaitTime[_msgSender()][protocolID].SZTTokenCount == value) {
+            checkWaitTime[_msgSender()][protocolID].ifTimerStarted = false;
         }
-        totalTokensStaked -= _value;
-        SZTToken.approve(_msgSender(), _value);
-        bool success = buySellContract.transferSZT(address(this), _msgSender(), _value);
+        totalTokensStaked -= value;
+        userSZTPoolBalance[_msgSender()] -= value;
+        bool removeSuccess = _protocolsRegistry.removeProtocolLiquidation(protocolID, value);
+        bool success = _tokenSZT.transfer(_msgSender(), value);
+        if (removeSuccess && success) {
+            emit PoolWithdrawn(_msgSender(), protocolID, value);
+            return true;
+        }
         return success;
     }
 
-    function buyAndStakeSZT(uint256 _value, uint256 _protocolID) external returns(bool) {
-        bool buySZTSuccess = buySellContract.buySZTToken(_value);
+    function buyAndStakeSZT(uint256 value, uint256 protocolID) external returns(bool) {
+        bool buySZTSuccess = _buySellContract.buySZTToken(value);
         if (buySZTSuccess) {
-            bool stakeSZTSuccess = underwrite(_value, _protocolID);
-            totalTokensStaked += _value;
+            totalTokensStaked += value;
+            bool stakeSZTSuccess = underwrite(value, protocolID);
             return stakeSZTSuccess;
         }
-        return false;
+        return buySZTSuccess;
     }
 
-    function calculateUserBalance(uint256 _protocolID) public view override returns(uint256) {
-        uint256 userBalance;
-        uint256 userStartVersion = usersInfo[_msgSender()][_protocolID].startVersionBlock;
-        uint256 currVersion =  protocolsRegistry.version();
-        uint256 premiumEarnedFlowRate;
-        uint256 userPremiumEarned;
-        uint256 riskPoolCategory;
+    function calculateUserBalance(uint256 protocolID) public view override returns(uint256) {
+        uint256 userBalance = 0;
+        uint256 userStartVersion = usersInfo[_msgSender()][protocolID].startVersionBlock;
+        uint256 currVersion =  _protocolsRegistry.version();
+        uint256 premiumEarnedFlowRate = 0;
+        uint256 userPremiumEarned = 0;
+        uint256 riskPoolCategory = 0;
         for (uint i = userStartVersion; i <= currVersion; i++) {
-            uint256 userVersionDepositedBalance = underwritersBalance[_msgSender()][_protocolID][i].depositedAmount;
-            uint256 userVersionWithdrawnBalance = underwritersBalance[_msgSender()][_protocolID][i].withdrawnAmount;
-            if (protocolsRegistry.ifProtocolUpdated(_protocolID, i)) {
-                riskPoolCategory = protocolsRegistry.getProtocolVersionRiskCategory(_protocolID, i);
+            uint256 userVersionDepositedBalance = underwritersBalance[_msgSender()][protocolID][i].depositedAmount;
+            uint256 userVersionWithdrawnBalance = underwritersBalance[_msgSender()][protocolID][i].withdrawnAmount;
+            if (_protocolsRegistry.ifProtocolUpdated(protocolID, i)) {
+                riskPoolCategory = _protocolsRegistry.getProtocolVersionRiskCategory(protocolID, i);
             }
-            if (protocolsRegistry.getEarnedPremiumFlowRate(riskPoolCategory, i) != premiumEarnedFlowRate) {
-                premiumEarnedFlowRate = protocolsRegistry.getEarnedPremiumFlowRate(riskPoolCategory, i);
+            if (_protocolsRegistry.getEarnedPremiumFlowRate(riskPoolCategory, i) != premiumEarnedFlowRate) {
+                premiumEarnedFlowRate = _protocolsRegistry.getEarnedPremiumFlowRate(riskPoolCategory, i);
             }
             if (userVersionDepositedBalance > 0) {
                 userBalance += userVersionDepositedBalance;
@@ -140,13 +162,17 @@ contract CoveragePool is Ownable, ICoveragePool {
             if (userVersionWithdrawnBalance > 0) {
                 userBalance -= userVersionWithdrawnBalance;
             } 
-            if (protocolsRegistry.isRiskPoolLiquidated(i, riskPoolCategory)) {
-                userBalance = ((userBalance * protocolsRegistry.getLiquidationFactor(riskPoolCategory, i)) / 100);
+            if (_protocolsRegistry.isRiskPoolLiquidated(i, riskPoolCategory)) {
+                userBalance = (userBalance * _protocolsRegistry.getLiquidationFactor(riskPoolCategory, i)) / 100;
             } 
-            userPremiumEarned = ((userBalance * premiumEarnedFlowRate)/protocolsRegistry.getGlobalProtocolLiquidity(riskPoolCategory, i));
+            userPremiumEarned = (userBalance * premiumEarnedFlowRate)/_protocolsRegistry.getGlobalProtocolLiquidity(riskPoolCategory, i);
               
         }
         userBalance += userPremiumEarned;
         return userBalance;
+    }
+
+    function getUnderwriteSZTBalance() external view override returns(uint256) {
+        return userSZTPoolBalance[_msgSender()];
     }
 }

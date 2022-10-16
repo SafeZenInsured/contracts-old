@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.17;
+pragma solidity 0.8.16;
 
-import "./../../../dependencies/openzeppelin/Ownable.sol";
-import "./../../../../interfaces/Compound/ICErc20.sol";
-import "./../../../../interfaces/Compound/IErc20.sol";
-import "./../../../../interfaces/Compound/ICompoundImplementation.sol";
-import "./../../../../interfaces/IERC20.sol";
+import "./../../../../dependencies/openzeppelin/Ownable.sol";
+import "./../../../../../interfaces/Compound/ICErc20.sol";
+import "./../../../../../interfaces/Compound/IErc20.sol";
+import "./../../../../../interfaces/Compound/ICompoundImplementation.sol";
+import "./../../../../../interfaces/IERC20.sol";
 import "./../ZPController.sol";
 
 /// Report any bug or issues at:
 /// @custom:security-contact anshik@safezen.finance
 contract CompoundPool is Ownable, ICompoundImplementation {
-    ZPController zpController;
+    SmartContractZPController zpController;
     uint256 protocolID;
     
     struct UserInfo {
@@ -25,7 +25,7 @@ contract CompoundPool is Ownable, ICompoundImplementation {
     mapping(address => mapping(address => UserInfo)) private usersInfo;
 
     constructor(address _controllerAddress) {
-        zpController = ZPController(_controllerAddress);
+        zpController = SmartContractZPController(_controllerAddress);
     }
 
     function mintERC20Tokens(address _userAddress, address _tokenAddress, uint256 _amount) external override {

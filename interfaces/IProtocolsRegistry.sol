@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.17;
+pragma solidity 0.8.16;
 
 /// Report any bug or issues at:
 /// @custom:security-contact anshik@safezen.finance
@@ -25,17 +25,17 @@ interface IProtocolsRegistry {
         uint256 _protocolID, 
         uint256 _coverageAmount, 
         uint256 _incomingFlowRate
-    ) external;
+    ) external returns(bool);
 
     function addProtocolLiquidation(
         uint256 _protocolID, 
         uint256 _liquiditySupplied
-    ) external;
+    ) external returns(bool);
 
     function removeProtocolLiquidation(
         uint256 _protocolID, 
         uint256 _liquiditySupplied
-    ) external;
+    ) external returns(bool);
 
     function requestAddNewProtocol(string memory _protocolName, address _protocolAddress) external;
 

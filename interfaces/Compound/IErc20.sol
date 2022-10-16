@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.17;
+pragma solidity 0.8.16;
 
 interface IErc20 {
     function allocateTo(address toAddress, uint256 value) external;

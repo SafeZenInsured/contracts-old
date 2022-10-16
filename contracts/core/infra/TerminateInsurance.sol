@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.17;
+pragma solidity 0.8.16;
 
 import "./../../dependencies/openzeppelin/Ownable.sol";
 import "./../../dependencies/openzeppelin/Pausable.sol";
@@ -11,72 +11,24 @@ import "./../../dependencies/gelato/OpsReady.sol";
 contract TerminateInsurance is OpsReady, Ownable, Pausable {
     using SafeERC20 for IERC20;
 
-    ICFA public _CFA;
-    uint256 public counter;
+    ICFA private _contractCFA;
 
-    mapping(address => mapping(uint256 => bytes32)) public taskID;
+    mapping(address => mapping(uint256 => bytes32)) private _taskID;
 
     constructor(address _ops) OpsReady(_ops) {
     }
 
-    function setCFAAddress(address _CFAAddress) external onlyOwner {
-        _CFA = ICFA(_CFAAddress);
-    }
-
     modifier onlyCFA() {
-        require(_msgSender() == address(_CFA));
+        require(_msgSender() == address(_contractCFA));
         _;
     }
 
-    function gelatoSpecificProtocolStopFlow(address _userAddress, uint256 _protocolID) external onlyOps whenNotPaused payable {
-        stopSpecificProtocolCFAFlow(_userAddress, _protocolID);
-        (uint256 feeAmount, ) = IOps(ops).getFeeDetails();
-        _payTxFee(feeAmount);
-    }
-
     error TransactionFailedError();
-    function stopSpecificProtocolCFAFlow(address _userAddress, uint256 _protocolID) internal {
-        if (
-            (_CFA.getUserInsuranceValidTillInfo(_userAddress, _protocolID) > block.timestamp) ||
-            (!_CFA.getUserInsuranceStatus(_userAddress, _protocolID))
-        ) {
-            revert TransactionFailedError();
-        }
-        _CFA.closeTokenStream(_userAddress, _protocolID);
-    }
+    error StopCFAFlowCallFailedError();
+    error CFATokenStreamTransactionFailed();
 
-    function createGelatoProtocolSpecificTask(address _userAddress, uint256 _protocolID) external payable onlyCFA {
-        // bytes4 _execSelector = bytes4(
-        //     abi.encodeWithSignature("gelatoSpecificProtocolStopFlow(address, uint256)", _userAddress, _protocolID)
-        // );
-        bytes memory resolverData = abi.encodeWithSignature("gelatoResolver(address, uint256)", _userAddress, _protocolID);
-        taskID[_userAddress][_protocolID] = IOps(ops).createTaskNoPrepayment(
-            address(this), 
-            // _execSelector,
-            this.gelatoSpecificProtocolStopFlow.selector,
-            address(this),
-            resolverData,
-            ETH
-        );
-    }
+    receive() external payable {}
 
-    /// @dev to cancel the gelato task
-    function cancelProtocolSpecificGelatoTask(address _userAddress, uint256 _protocolID) external onlyCFA {
-        bytes32 _taskID = taskID[_userAddress][_protocolID];
-        IOps(ops).cancelTask(_taskID);
-    }
-
-    function gelatoResolver(address _userAddress, uint256 _protocolID)
-        external
-        view
-        returns (bool canExec, bytes memory execPayload)
-    {
-        canExec = (_CFA.getUserInsuranceValidTillInfo(_userAddress, _protocolID) <= block.timestamp) &&
-            (_CFA.getUserInsuranceStatus(_userAddress, _protocolID));
-        execPayload = abi.encodeWithSignature("gelatoDistribute()");
-    }
-
-    //Recovery
     function recoverToken(address token, bool native) external onlyOwner {
         if (native) {
             (bool success, ) = owner().call{value: address(this).balance}("");
@@ -87,5 +39,71 @@ contract TerminateInsurance is OpsReady, Ownable, Pausable {
         }
     }
 
-    receive() external payable {}
+    function setCFAAddress(address constantFlowContractAddress) external onlyOwner {
+        _contractCFA = ICFA(constantFlowContractAddress);
+    }
+
+    function createGelatoProtocolSpecificTask(
+        address userAddress, 
+        uint256 protocolID
+    ) external payable onlyCFA {
+        // bytes4 _execSelector = bytes4(
+        //     abi.encodeWithSignature("gelatoSpecificProtocolStopFlow(address, uint256)", _userAddress, _protocolID)
+        // );
+        bytes memory resolverData = abi.encodeWithSignature("gelatoResolver(address, uint256)", userAddress, protocolID);
+        _taskID[userAddress][protocolID] = IOps(ops).createTaskNoPrepayment(
+            address(this), 
+            // _execSelector,
+            this.gelatoSpecificProtocolStopFlow.selector,
+            address(this),
+            resolverData,
+            ETH
+        );
+    }
+
+    /// @dev to cancel the gelato task
+    function cancelProtocolSpecificGelatoTask(address userAddress, uint256 protocolID) external onlyCFA {
+        bytes32 taskID = _taskID[userAddress][protocolID];
+        IOps(ops).cancelTask(taskID);
+    }
+
+    function gelatoSpecificProtocolStopFlow(
+        address userAddress, 
+        uint256 protocolID
+    ) external onlyOps whenNotPaused payable returns(bool) {
+        bool success = stopSpecificProtocolCFAFlow(userAddress, protocolID);
+        if (!success) {
+            revert StopCFAFlowCallFailedError();
+        }
+        (uint256 feeAmount, ) = IOps(ops).getFeeDetails();
+        _payTxFee(feeAmount);
+        return true;
+    }
+
+    function stopSpecificProtocolCFAFlow(
+        address userAddress, 
+        uint256 protocolID
+    ) internal returns(bool) {
+        if (
+            (_contractCFA.getUserInsuranceValidTillInfo(userAddress, protocolID) > block.timestamp) ||
+            (!_contractCFA.getUserInsuranceStatus(userAddress, protocolID))
+        ) {
+            revert TransactionFailedError();
+        }
+        bool success = _contractCFA.closeTokenStream(userAddress, protocolID);
+        if (!success) {
+            revert CFATokenStreamTransactionFailed();
+        }
+        return true;
+    }
+
+    function gelatoResolver(
+        address userAddress, 
+        uint256 protocolID
+    ) external view returns (bool, bytes memory) {
+        bool canExec = (_contractCFA.getUserInsuranceValidTillInfo(userAddress, protocolID) <= block.timestamp) &&
+            (_contractCFA.getUserInsuranceStatus(userAddress, protocolID));
+        bytes memory execPayload = abi.encodeWithSignature("gelatoDistribute()");
+        return (canExec, execPayload);
+    }
 }

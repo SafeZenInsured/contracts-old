@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.17;
+pragma solidity 0.8.16;
 
 import "./../../dependencies/openzeppelin/Ownable.sol";
 import "./../../../interfaces/ISZTStaking.sol";
@@ -10,12 +10,12 @@ import "./../../../interfaces/IERC20.sol";
 /// NOTE: Staking tokens would be used for activities like flash loans 
 /// to generate rewards for the staked users
 contract SZTStaking is Ownable, ISZTStaking {
-    uint256 public minStakeValue;
-    IBuySellSZT public buySellContract;
-    IERC20 public SZTToken;
-    IERC20 public GSZTToken;
+    uint256 private minStakeValue;
     uint256 public override totalTokensStaked;
-
+    IERC20 private SZTToken;
+    IERC20 private GSZTToken;
+    IBuySellSZT private buySellContract;
+    
     constructor(address _buySellAddress, address _SZTTokenAddress) {
         buySellContract = IBuySellSZT(_buySellAddress);
         SZTToken = IERC20(_SZTTokenAddress);
@@ -45,9 +45,11 @@ contract SZTStaking is Ownable, ISZTStaking {
         StakerInfo storage staker = stakers[_msgSender()];
         staker.amountStaked += _value;
         totalTokensStaked += _value;
-        bool success = buySellContract.stakingTransferSZT(_msgSender(), address(this), _value);
+        bool success = SZTToken.transferFrom(_msgSender(), address(this), _value);
         return success;
     }
+
+    
 
     uint256 public withdrawTimer = 1 minutes;
     /// NOTE: Changing minutes to day [minutes done for testing purpose]
@@ -80,8 +82,7 @@ contract SZTStaking is Ownable, ISZTStaking {
         ) {
             revert TransactionFailedError();
         }
-        SZTToken.approve(address(buySellContract), _value);
-        bool success = buySellContract.stakingTransferSZT(address(this), _msgSender(), _value);
+        bool success = SZTToken.transfer(_msgSender(), _value);
         staker.amountStaked -= _value;
         if (checkWaitTime[_msgSender()].SZTTokenCount == _value) {
             checkWaitTime[_msgSender()].ifTimerStarted = false;
@@ -101,7 +102,11 @@ contract SZTStaking is Ownable, ISZTStaking {
         return false;
     }
 
-    function getUserBalance(address userAddress) external view override returns(uint256) {
-        return stakers[userAddress].amountStaked;
+    function getUserStakedSZTBalance() external view override returns(uint256) {
+        return stakers[_msgSender()].amountStaked;
+    }
+
+    function getStakerRewardInfo() external view returns(uint256) {
+        return stakers[_msgSender()].rewardEarned;
     }
 }

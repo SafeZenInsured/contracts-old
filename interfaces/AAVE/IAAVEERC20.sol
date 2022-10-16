@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: agpl-3.0
-pragma solidity 0.8.17;
+pragma solidity 0.8.16;
 
 interface IAAVEERC20 {
     // minting fake tokens for testnet purpose

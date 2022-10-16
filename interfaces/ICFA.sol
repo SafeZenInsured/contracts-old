@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.17;
+pragma solidity 0.8.16;
 
 
 interface ICFA {
@@ -12,7 +12,7 @@ interface ICFA {
 
     function closeTokenStream(address userAddress, uint256 protocolID) external returns(bool);
 
-    function transferFrom(address from, address to, uint256 amount) external returns(bool);
+    function transfer(address to, uint256 amount) external returns(bool);
 
     function getUserInsuranceValidTillInfo(address _userAddress, uint256 _protocolID) external view returns(uint256);
 

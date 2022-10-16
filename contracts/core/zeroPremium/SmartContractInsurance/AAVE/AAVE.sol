@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.17;
+pragma solidity 0.8.16;
 
-import "./../../../../interfaces/AAVE/IAAVE.sol"; // aave contracts to supply and borrow
-import "./../../../../interfaces/AAVE/IAAVEERC20.sol"; 
-import "./../../../../interfaces/AAVE/IAAVEImplementation.sol"; 
-import "./../../../dependencies/openzeppelin/Ownable.sol"; // accessable by admin
+import "./../../../../../interfaces/AAVE/IAAVE.sol"; // aave contracts to supply and borrow
+import "./../../../../../interfaces/AAVE/IAAVEERC20.sol"; 
+import "./../../../../../interfaces/AAVE/IAAVEImplementation.sol"; 
+import "./../../../../dependencies/openzeppelin/Ownable.sol"; // accessable by admin
 import "./../ZPController.sol";
 
 /// Report any bug or issues at:
@@ -13,7 +13,7 @@ import "./../ZPController.sol";
 // TODO: ADDING EVENTS
 contract AAVE is Ownable, IAAVEImplementation {
     IAAVE LendAAVE;  // AAVE v3 Supply and Withdraw Interface
-    ZPController zpController;  // Zero Premium Controller Interface
+    SmartContractZPController zpController;  // Zero Premium Controller Interface
     uint256 protocolID;  // Unique Protocol ID
 
     /// @dev: Struct storing the user info
@@ -39,7 +39,7 @@ contract AAVE is Ownable, IAAVEImplementation {
         address _controllerAddress
     ) {
         LendAAVE = IAAVE(_lendingAddress);
-        zpController = ZPController(_controllerAddress);
+        zpController = SmartContractZPController(_controllerAddress);
     }
 
     /// @dev Initialize this function first before running any other function

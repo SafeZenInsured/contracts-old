@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.17;
+pragma solidity 0.8.16;
 
 import "./../../../interfaces/IERC20.sol";
 import "./../../../interfaces/IERC20Extended.sol";
@@ -8,242 +8,175 @@ import "./../../../interfaces/ISZTStaking.sol";
 import "./../../../interfaces/ICoveragePool.sol";
 import "./../../dependencies/openzeppelin/Ownable.sol";
 import "./../../dependencies/openzeppelin/Pausable.sol";
+import "./../../dependencies/openzeppelin/ReentrancyGuard.sol";
 
 /// @title Buy Sell SZT Contract
 /// @author Anshik Bansal <anshik@safezen.finance>
 
 /// Report any bug or issues at:
 /// @custom:security-contact anshik@safezen.finance
-contract BuySellSZT is Ownable, IBuySellSZT, Pausable {
-    uint256 private constant SZT_BASE_PRICE = 100;  // SZT token base price
-    uint256 private constant SZT_BASE_PRICE_WITH_DEC = 100 * 1e18; // SZT token base price with decimals
-    uint256 private tokenCounter;  // SZT tokens in circulation
-    uint256 private immutable _commonRatio;  // common ratio for SZT YUVAA calculations
-    IERC20 private _safezenToken; // native SZT token
-    IERC20Extended private _safezenGovernanceToken; // native GSZT token
-    IERC20 private immutable DAI; // DAI token
-    ISZTStaking private _staking; // SZT Staking Contract
-    ICoveragePool private _coveragePool; // Coverage Pool Contract
-
-    /// @dev adds the sell timer, allowing user to sell only after the specified time period
-    /// @param ifTimerStarted: checks if the sell timer has started
-    /// @param SZTTokenCount: record the number of tokens user wishes to sell
-    /// @param canWithdrawTime: record the time when user can sell their tokens to BuySell Contract
-    struct SellWaitPeriod{
-        bool ifTimerStarted;
-        uint256 SZTTokenCount;
-        uint256 canWithdrawTime;
-    }
-
-    /// @dev record the user penalty [governance, if they try to cheat in the claim and governance decisions]
-    mapping (address => uint256) private _userSZTPenalty; 
-    /// @dev map each user address with the sellWaitPeriod struct
-    mapping (address => SellWaitPeriod) private _checkWaitTime;
+contract BuySellSZT is Ownable, IBuySellSZT, Pausable, ReentrancyGuard {
+    // SZT token base price
+    uint256 private constant SZT_BASE_PRICE = 100;
+    // SZT token base price with decimals
+    uint256 private constant SZT_BASE_PRICE_WITH_DEC = 100 * 1e18;
+    // SZT tokens in circulation
+    uint256 private _tokenCounter;
+    // common ratio for SZT YUVAA calculations
+    uint256 private immutable _commonRatio;
+    // native SZT token
+    IERC20 private _safezenToken;
+    // native GSZT token
+    IERC20Extended private _safezenGovernanceToken;
+    // DAI token
+    IERC20 private immutable _tokenDAI;
+    // SZT Staking Contract
+    ISZTStaking private _staking;
+    // Coverage Pool Contract
+    ICoveragePool private _coveragePool;
     
-    /// @dev immutable commonRatio, needed for non-speculation part of our SZT tokens & initializing DAI
+    /// @dev immutable commonRatio, needed for non-speculation part of our SZT tokens & initializing _tokenDAI
     /// @param _value: value of the common Ratio
     /// @param _decimals: decimals against the value of the commmon ratio
-    /// @param _DAIaddress: address of the DAI token
-    constructor(uint256 _value, uint256 _decimals, address _DAIaddress) {
+    /// @param __tokenDAIaddress: address of the _tokenDAI token
+    constructor(uint256 _value, uint256 _decimals, address __tokenDAIaddress) {
         _commonRatio = (_value * 10e17) / (10 ** _decimals); 
-        DAI = IERC20(_DAIaddress); 
-    }
-
-    /// @dev to set the address of our SZT token
-    /// @param _safeZenTokenCA: address of the SZT token
-    function setSafeZenTokenCA(address _safeZenTokenCA) external onlyOwner {
-        _safezenToken = IERC20(_safeZenTokenCA);
-    }
-
-    /// @dev to set the address of SZT staking contract
-    /// @param _SZTStakingCA: address of the SZT staking contract
-    function setSZTStakingCA(address _SZTStakingCA) external onlyOwner {
-        _staking = ISZTStaking(_SZTStakingCA);
-    }
-
-    /// @dev to set the address of the pay-as-you-go-coverage pool contract
-    /// @param _coveragePoolCA: address of the coverage pool contract
-    function setCoveragePoolCA(address _coveragePoolCA) external onlyOwner {
-        _coveragePool = ICoveragePool(_coveragePoolCA);
-    }
-
-    /// @dev to set the address of our GSZT token
-    /// @param _safezenGovernanceTokenCA: address of the GSZT token
-    function setSafeZenGovernanceTokenCA(address _safezenGovernanceTokenCA) external onlyOwner {
-        _safezenGovernanceToken = IERC20Extended(_safezenGovernanceTokenCA);
-    }
-
-    /// @dev for assigning the penalty incase user cheats or 
-    /// give false info in our governance or claim processing
-    /// @param penaltyValue: amount of tokens the user will be penalized [based on our whitepaper]
-    function addPenalty(uint256 penaltyValue) external onlyOwner {
-        _userSZTPenalty[_msgSender()] += penaltyValue;
-    }
-    
-    error TransactionFailed();
-    /// @dev minting the GSZT tokens to the provided user address
-    /// @param _userAddress: user address
-    function mintGSZT(address _userAddress) internal {
-        uint256 userSZTBalance = _safezenToken.balanceOf(_userAddress);
-        uint256 userSZTCount = userSZTBalance - _userSZTPenalty[_userAddress];
-        uint256 userGSZTBalance = _safezenGovernanceToken.balanceOf(_userAddress);
-        uint256 GSZTTokenCount = calculateGSZTTokenCount(userSZTCount);
-        GSZTTokenCount = GSZTTokenCount > (22750 * 1e18) ? (userSZTBalance / 2) : GSZTTokenCount;
-        uint256 toMint = (GSZTTokenCount - userGSZTBalance);
-        if (toMint > 0) {
-            _safezenGovernanceToken.mint(_userAddress, toMint);
-        }
-    }
-
-    /// @dev minting the tokens to investors based on the price of equivalent SZT token
-    /// @param _investorAddress: wallet address of the investors (can be a Gnosis Safe account)
-    /// @param _equivalentSZTTokens: equivalent SZT tokens based on the amount invested
-    function mintGSZTForInvestors(
-        address _investorAddress, 
-        uint256 _equivalentSZTTokens
-    ) 
-        external onlyOwner 
-    {
-        uint256 GSZTToMint = calculateGSZTTokenCount(_equivalentSZTTokens);
-        _safezenGovernanceToken.mint(_investorAddress, GSZTToMint);
-    }
-
-    /// @dev transferring tokens from one investor to a new investor
-    /// @param _investorAddress: address of the initial investor
-    /// @param _newInvestorAddress: address of the new investor
-    function transferGSZTforInvestors(
-        address _investorAddress, 
-        address _newInvestorAddress
-    ) external onlyOwner {
-        uint256 GSZTBalance = _safezenGovernanceToken.balanceOf(_investorAddress);
-        _safezenGovernanceToken.burnFrom(_investorAddress, GSZTBalance);
-        _safezenGovernanceToken.mint(_newInvestorAddress, GSZTBalance);
+        _tokenDAI = IERC20(__tokenDAIaddress); 
     }
 
     error LowAmountError();
+    error LowSZTBalanceError();
+    error GSZTBurnFailedError();
+    error GSZTMintFailedError();
+    error TransactionFailedError();
+    error ZeroAddressTransactionError();
+
+    /// @dev to set the address of our SZT token
+    /// @param safeZenTokenAddress: address of the SZT token
+    function setSafeZenTokenCA(address safeZenTokenAddress) external onlyOwner {
+        _safezenToken = IERC20(safeZenTokenAddress);
+    }
+
+    /// @dev to set the address of SZT staking contract
+    /// @param stakingContractAddress: address of the SZT staking contract
+    function setSZTStakingCA(address stakingContractAddress) external onlyOwner {
+        _staking = ISZTStaking(stakingContractAddress);
+    }
+
+    /// @dev to set the address of the pay-as-you-go-coverage pool contract
+    /// @param coveragePoolAddress: address of the coverage pool contract
+    function setCoveragePoolCA(address coveragePoolAddress) external onlyOwner {
+        _coveragePool = ICoveragePool(coveragePoolAddress);
+    }
+
+    /// @dev to set the address of our GSZT token
+    /// @param safezenGovernanceTokenCA: address of the GSZT token
+    function setSafeZenGovernanceTokenCA(
+        address safezenGovernanceTokenCA
+    ) external onlyOwner {
+        _safezenGovernanceToken = IERC20Extended(safezenGovernanceTokenCA);
+    }
+
     /// @dev buying our native non-speculative SZT token
-    /// @param _value: amount of SZT tokens user wishes to purchase
-    function buySZTToken(uint256 _value) external override returns(bool) {
-        (/*uint amountPerToken*/, uint amountToBePaid) = calculateSZTPrice(tokenCounter, (tokenCounter + _value));
-        if (DAI.balanceOf(_msgSender()) < amountToBePaid) {
+    /// @param value: amount of SZT tokens user wishes to purchase
+    function buySZTToken(uint256 value) external override nonReentrant returns(bool) {
+        if ((_tokenCounter < 1e18) && (value < 1e18)) {
             revert LowAmountError();
         }
-        DAI.transferFrom(_msgSender(), address(this), amountToBePaid);
-        bool success = _safezenToken.transfer( _msgSender(), _value);
-        mintGSZT(_msgSender());
-        tokenCounter += _value;
-        if (!success) {
+        (/*uint256 amountPerToken*/, uint256 amountToBePaid) = calculateSZTPrice(
+            _tokenCounter, (_tokenCounter + value)
+        );
+        if (_tokenDAI.balanceOf(_msgSender()) < amountToBePaid) {
+            revert LowAmountError();
+        }
+        _tokenCounter += value;
+        bool transferSuccess_tokenDAI = _tokenDAI.transferFrom(_msgSender(), address(this), amountToBePaid);
+        bool transferSuccessSZT = _safezenToken.transfer(_msgSender(), value);
+        bool mintSuccessGSZT = mintGSZT(_msgSender());
+        if ((!transferSuccess_tokenDAI) || (!transferSuccessSZT) || (!mintSuccessGSZT)) {
             revert TransactionFailedError();
         }
-        emit BoughtSZT(_msgSender(), _value);
+        emit BoughtSZT(_msgSender(), value);
         return true;
     }
-
-    error ZeroAddressTransactionError();
-    error TransactionFailedError();
-    /// @dev transfer function for SZT [and GSZT tokens]
-    /// @param _from: sending user address
-    /// @param _to: receiving user address
-    /// @param _value: amount of SZT tokens user [sending address] wishes to transfer to other user [receiving address]
-    function transferSZT(address _from, address _to, uint _value) external override returns(bool) {
-        if (_from == address(0) || _to == address(0) || _value == 0) {
-            revert ZeroAddressTransactionError();
-        }
-        bool success = _safezenToken.transferFrom(_from, _to, _value);
-
-        mintGSZT(_to);
-
-        if (_from != address(this)) {
-            _safezenGovernanceToken.burnFrom(_from, burnGSZTToken(_from));
-        }
-
-        if (!success) {
-            revert TransactionFailedError();
-        }
-        emit TransferredSZT(_from, _to, _value);
-        return true;
-    }
-
-    modifier onlySZTStakingContract() {
-        require(_msgSender() == address(_staking));
-        _;
-    }
-
-    function stakingTransferSZT(address _from, address _to, uint _value) external override onlySZTStakingContract returns(bool) {
-        bool success = _safezenToken.transferFrom(_from, _to, _value);
-        if (_to != address(_staking)) {
-          mintGSZT(_to);  
-        }
-        return success;
-    }
-
-    /// @dev Burning the GSZT token
-    /// @param _userAddress: wallet address of the user
-    function burnGSZTToken(address _userAddress) view internal returns(uint256) {
-        uint256 userSZTBalance = _safezenToken.balanceOf(_userAddress);
-        uint256 userSZTCount = userSZTBalance - _userSZTPenalty[_userAddress];
-        uint256 GSZTAmountToHave = calculateGSZTTokenCount(userSZTCount);
-        uint256 GSZTAmountUserHave = _safezenGovernanceToken.balanceOf(_userAddress);
-        uint256 amountToBeBurned = GSZTAmountUserHave - GSZTAmountToHave;
-        return amountToBeBurned;
-    }
-
-    uint256 public sellTimer = 1 minutes;
-    /// NOTE: Changing minutes to day [minutes done for testing purpose]
-    function setWithdrawTime(uint256 _time) external onlyOwner {
-        sellTimer = _time * 1 minutes;
-    }
-
-    /// @dev activating the timer if the user wishes to sell his/her/their tokens [to prevent front running]
-    /// @param _value: the amount of token user wishes to withdraw
-    function activateSellTimer(uint256 _value) external override returns(bool) {
-        if (
-            (!(_checkWaitTime[_msgSender()].ifTimerStarted)) || 
-            (_checkWaitTime[_msgSender()].SZTTokenCount < _value)
-        ) {
-            SellWaitPeriod storage waitingTimeCountdown = _checkWaitTime[_msgSender()];
-            waitingTimeCountdown.ifTimerStarted = true;
-            waitingTimeCountdown.SZTTokenCount = _value;
-
-            waitingTimeCountdown.canWithdrawTime = sellTimer + block.timestamp;
-            return true;
-        }
-        return false;
-    }
-
-    error LowSZTBalanceError();
+    
     /// NOTE: approve SZT and GSZT amount to BuySellContract before calling this function
     /// @dev selling the SZT tokens
-    /// @param _value: the amounnt of SZT tokens user wishes to sell
-    function sellSZTToken(uint256 _value) external override whenNotPaused returns(bool) {
-        if (_safezenToken.balanceOf(_msgSender()) < (_value)) {
+    /// @param value: the amounnt of SZT tokens user wishes to sell
+    function sellSZTToken(uint256 value) external override whenNotPaused nonReentrant returns(bool) {
+        if (_safezenToken.balanceOf(_msgSender()) < (value)) {
             revert LowSZTBalanceError();
         }
-        if (
-            (block.timestamp >= _checkWaitTime[_msgSender()].canWithdrawTime) &&
-            (_value <= _checkWaitTime[_msgSender()].SZTTokenCount)
-        ) {
-            uint256 tokenCount = getSZTTokenCount();
-            bool SZTTransferSuccess = _safezenToken.transferFrom(_msgSender(), address(this), _value);
-            bool GSZTBurnSuccess = _safezenGovernanceToken.burnFrom(_msgSender(), burnGSZTToken(_msgSender()));
-            (/*amountPerToken*/, uint256 amountToBeReleased) = calculateSZTPrice((tokenCount - _value), tokenCount);
-            bool DAITransferSuccess = DAI.transfer(_msgSender(), amountToBeReleased);
-            if ((!DAITransferSuccess) || (!GSZTBurnSuccess) || (!SZTTransferSuccess)) {
-                revert TransactionFailed();
-            }
-            if (_checkWaitTime[_msgSender()].SZTTokenCount == _value) {
-                _checkWaitTime[_msgSender()].ifTimerStarted = false;
-            }
-            _checkWaitTime[_msgSender()].SZTTokenCount -= _value;
-            tokenCounter -= _value;
-            return true;
+        uint256 tokenCount = getSZTTokenCount();
+        (/*amountPerToken*/, uint256 amountToBeReleased) = calculateSZTPrice(
+            (tokenCount - value), tokenCount
+        );
+        _tokenCounter -= value;
+        bool transferSuccessSZT = _safezenToken.transferFrom(_msgSender(), address(this), value);
+        bool burnSuccessGSZT = _safezenGovernanceToken.burnFrom(
+            _msgSender(), burnGSZTToken(_msgSender())
+        );
+        bool _tokenDAITransferSuccess = _tokenDAI.transfer(_msgSender(), amountToBeReleased);
+        if ((!_tokenDAITransferSuccess) || (!burnSuccessGSZT) || (!transferSuccessSZT)) {
+            revert TransactionFailedError();
         }
-        return false;
+        emit SoldSZT(_msgSender(), value);
+        return true;
+    }
+
+    /// @dev minting the tokens to investors based on the price of equivalent SZT token
+    /// @param investorAddress: wallet address of the investors (can be a Gnosis Safe account)
+    /// @param equivalentSZTTokens: equivalent SZT tokens based on the amount invested
+    function mintGSZTForInvestors(
+        address investorAddress, 
+        uint256 equivalentSZTTokens
+    ) external onlyOwner returns(bool) {
+        uint256 toMintGSZT = calculateGSZTTokenCount(equivalentSZTTokens);
+        bool success = _safezenGovernanceToken.mint(investorAddress, toMintGSZT);
+        if (!success) {
+            revert TransactionFailedError();
+        }
+        emit GSZTMint(investorAddress, toMintGSZT);
+        return true;
+    }
+
+    /// @dev transferring tokens from one investor to a new investor
+    /// @param investorAddress: address of the initial investor
+    /// @param newInvestorAddress: address of the new investor
+    function transferGSZTforInvestors(
+        address investorAddress, 
+        address newInvestorAddress
+    ) external onlyOwner returns(bool){
+        uint256 balanceGSZT = _safezenGovernanceToken.balanceOf(investorAddress);
+        bool burnSuccessGSZT = _safezenGovernanceToken.burnFrom(investorAddress, balanceGSZT);
+        bool mintSuccessGSZT = _safezenGovernanceToken.mint(newInvestorAddress, balanceGSZT);
+        if ((!burnSuccessGSZT) || (!mintSuccessGSZT)) {
+            revert TransactionFailedError();
+        }
+        emit GSZTOwnershipTransferred(investorAddress, newInvestorAddress, balanceGSZT);
+        return true;
+    }
+
+    /// @dev minting the GSZT tokens to the provided user address
+    /// @param userAddress: user address
+    function mintGSZT(address userAddress) internal returns(bool) {
+        uint256 userSZTBalance = _safezenToken.balanceOf(userAddress);
+        uint256 amountStaked = _staking.getUserStakedSZTBalance() + _coveragePool.getUnderwriteSZTBalance();
+        uint256 tokenCountGSZT = calculateGSZTTokenCount(userSZTBalance + amountStaked);
+        tokenCountGSZT = (tokenCountGSZT > (22750 * 1e18)) ? (userSZTBalance / 2) : tokenCountGSZT;
+        uint256 userGSZTBalance = _safezenGovernanceToken.balanceOf(userAddress);
+        uint256 toMint = tokenCountGSZT - userGSZTBalance;
+        bool success = _safezenGovernanceToken.mint(userAddress, toMint);
+        if (!success) {
+            revert GSZTMintFailedError(); 
+        }
+        emit GSZTMint(userAddress, toMint);
+        return true;
     }
 
     /// @dev check the current SZT token price
-    function viewSZTCurrentPrice() view external override returns(uint) {
-        uint256 SZTCommonRatio = (_commonRatio * SZT_BASE_PRICE * tokenCounter)/1e18;
+    function viewSZTCurrentPrice() external view override returns(uint256) {
+        uint256 SZTCommonRatio = (_commonRatio * SZT_BASE_PRICE * _tokenCounter)/1e18;
         uint256 amountPerToken = (SZT_BASE_PRICE * (1e18)) + SZTCommonRatio;
         return amountPerToken;
     }
@@ -251,12 +184,15 @@ contract BuySellSZT is Ownable, IBuySellSZT, Pausable {
     /// @dev calculate the SZT token value for the asked amount of SZT tokens
     /// @param issuedSZTTokens: the amount of SZT tokens currently in circulation
     /// @param requiredTokens: issuedSZTTokens + the amount of SZT tokens required
-    function calculateSZTPrice(uint256 issuedSZTTokens, uint256 requiredTokens) view public override returns(uint, uint) {
-        uint256 SZTCommonRatio = _commonRatio * SZT_BASE_PRICE;
+    function calculateSZTPrice(
+        uint256 issuedSZTTokens, 
+        uint256 requiredTokens
+    ) public view override returns(uint256, uint256) {
+        uint256 commonRatioSZT = _commonRatio * SZT_BASE_PRICE;
         // to avoid check everytime, we prefer to buy first token.
         // uint256 _required = requiredTokens > 1e18 ? requiredTokens - 1e18 : 1e18 - requiredTokens;
         uint256 tokenDifference = (issuedSZTTokens + (requiredTokens - 1e18));
-        uint256 averageDiff = ((SZTCommonRatio * tokenDifference) / 2) / 1e18;
+        uint256 averageDiff = ((commonRatioSZT * tokenDifference) / 2) / 1e18;
         uint256 amountPerToken = SZT_BASE_PRICE_WITH_DEC + averageDiff;
         uint256 amountToBePaid = (amountPerToken * (requiredTokens - issuedSZTTokens))/1e18;
         return (amountPerToken, amountToBePaid);
@@ -266,35 +202,61 @@ contract BuySellSZT is Ownable, IBuySellSZT, Pausable {
     /// @param issuedSZTTokens: amount of SZT tokens currently in circulation
     /// @param alpha: alpha value for the calculation of GSZT token
     /// @param decimals: to calculate the actual alpha value for GSZT tokens 
-    function calculateGSZTCommonRatio(uint256 issuedSZTTokens, uint256 alpha, uint256 decimals) pure internal returns(uint256) {
-        uint256 GSZTcommonRatio = ((alpha * 1e18) / (10 ** decimals));
-        uint256 tokenValue = (GSZTcommonRatio * SZT_BASE_PRICE * issuedSZTTokens) / 1e18;
+    function calculateGSZTCommonRatio(
+        uint256 issuedSZTTokens, 
+        uint256 alpha, 
+        uint256 decimals
+    ) internal pure returns(uint256) {
+        uint256 mantissa = 10 ** decimals;
+        uint256 tokenValue = (alpha * SZT_BASE_PRICE * issuedSZTTokens) / mantissa;
         uint256 amountPerToken = SZT_BASE_PRICE_WITH_DEC + tokenValue;
         return amountPerToken;
     }
 
+    /// @dev Burning the GSZT token
+    /// @param userAddress: wallet address of the user
+    function burnGSZTToken(address userAddress) internal view returns(uint256) {
+        uint256 userSZTBalance = _safezenToken.balanceOf(userAddress);
+        uint256 amountStaked = _staking.getUserStakedSZTBalance() + _coveragePool.getUnderwriteSZTBalance();
+        uint256 GSZTAmountToHave = calculateGSZTTokenCount(userSZTBalance + amountStaked);
+        uint256 GSZTAmountUserHave = _safezenGovernanceToken.balanceOf(userAddress);
+        uint256 amountToBeBurned = GSZTAmountUserHave - GSZTAmountToHave;
+        return amountToBeBurned;
+    }
+
     /// @dev calculating the GSZT token to be awarded to user based on the amount of SZT token user have
     /// @param issuedSZTTokens: amount of issued SZT tokens to user    
-    function calculateGSZTTokenCount(uint256 issuedSZTTokens) internal pure returns(uint256) {
-        uint256 commonRatioA = (SZT_BASE_PRICE * 1e36) / calculateGSZTCommonRatio(issuedSZTTokens, 17, 2);
-        uint256 commonRatioB = (calculateGSZTCommonRatio(issuedSZTTokens, 22, 6) / (SZT_BASE_PRICE)) - (1e18);
+    function calculateGSZTTokenCount(
+        uint256 issuedSZTTokens
+    ) internal pure returns(uint256) {
+        uint256 commonRatioA = (
+            (SZT_BASE_PRICE * 1e36) / 
+            calculateGSZTCommonRatio(issuedSZTTokens, 17, 2)
+        );
+        uint256 commonRatioB = (
+            (calculateGSZTCommonRatio(issuedSZTTokens, 22, 6) / 
+            (SZT_BASE_PRICE)) - (1e18)
+        );
         uint256 GSZTTokenCount = ((commonRatioA + commonRatioB) * issuedSZTTokens) / 1e18;
         return GSZTTokenCount;
     }
 
     /// @dev to check the common ratio used in the price calculation of SZT token 
-    function getCommonRatio() view external returns (uint256) {
+    function getCommonRatio() external view returns (uint256) {
         return _commonRatio;
     }
 
     /// @dev returns the token in circulation - tokens staked [IMP.]
     function getSZTTokenCount() public view override returns(uint256) {
-        uint256 tokenCount = ((tokenCounter - _staking.totalTokensStaked()) - _coveragePool.totalTokensStaked());
+        uint256 tokenCount = (
+            (_tokenCounter - _staking.totalTokensStaked()) - 
+            _coveragePool.totalTokensStaked()
+        );
         return tokenCount;
     }
 
     function getTokenCounter() public view returns(uint256) {
-        return tokenCounter;
+        return _tokenCounter;
     }
 
     function getSZTBasePrice() public pure returns(uint256) {
