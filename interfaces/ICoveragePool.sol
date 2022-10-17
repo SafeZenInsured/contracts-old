@@ -22,4 +22,6 @@ interface ICoveragePool {
     function calculateUserBalance(uint256 protocolID) external view returns(uint256);
 
     function getUnderwriteSZTBalance() external view returns(uint256);
+
+    function getUnderwriterActiveVersionID(uint256 protocolID) external view returns(uint256[] memory);
 }

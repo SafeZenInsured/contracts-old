@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.16;
 
-import "./../../../../interfaces/IERC20.sol";
-import "./../../../dependencies/openzeppelin/Ownable.sol";
-import "./../../../dependencies/openzeppelin/Pausable.sol";
+import "./../../../interfaces/IERC20.sol";
+import "./../../dependencies/openzeppelin/Ownable.sol";
+import "./../../dependencies/openzeppelin/Pausable.sol";
 
 /// @title Insurance Claim Governance
 /// @author Anshik Bansal <anshik@safezen.finance>
@@ -99,7 +99,7 @@ contract ClaimGovernance is Ownable, Pausable{
         ++individualClaims[_msgSender()];
         ++protocolSpecificClaims[protocolID];
         ++_openClaimsCount;
-        pause();
+        _pause();
     }
      
     
@@ -171,7 +171,7 @@ contract ClaimGovernance is Ownable, Pausable{
         claims[claimID].closed = true;
         --_openClaimsCount;
         if (_openClaimsCount == 0) {
-            unpause();
+            _unpause();
         }
     }
 
@@ -191,14 +191,6 @@ contract ClaimGovernance is Ownable, Pausable{
         );
         ++claims[_claimID].votingInfo[_claimID].votingCounts; 
         // ^ global claimID, as the latest claim refers to challenged claim
-    }
-
-    function pause() internal {
-        _pause();
-    }
-
-    function unpause() internal {
-        _unpause();
     }
 
     function viewVoteReceipt(uint256 claimID) external view returns(bool, bool, uint256) {

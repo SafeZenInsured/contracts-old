@@ -12,9 +12,9 @@ import "./../ZPController.sol";
 
 // TODO: ADDING EVENTS
 contract AAVE is Ownable, IAAVEImplementation {
-    IAAVE LendAAVE;  // AAVE v3 Supply and Withdraw Interface
-    SmartContractZPController zpController;  // Zero Premium Controller Interface
-    uint256 protocolID;  // Unique Protocol ID
+    IAAVE private _lendingAAVE;  // AAVE v3 Supply and Withdraw Interface
+    SmartContractZPController private _zpController;  // Zero Premium Controller Interface
+    uint256 private _protocolID;  // Unique Protocol ID
 
     /// @dev: Struct storing the user info
     /// @param isActiveInvested: checks if the user has already deposited funds in AAVE via us
@@ -26,10 +26,10 @@ contract AAVE is Ownable, IAAVEImplementation {
         uint256 withdrawnBalance;
     }
 
-    /// Maps --> User Address => Reward Token Address => Version => UserTransactionInfo
-    mapping(address => mapping(address => mapping(uint256 => uint256))) private userTransactionInfo;
     /// Maps --> User Address => Reward Token Address => UserInfo struct
     mapping(address => mapping(address => UserInfo)) private usersInfo;
+    /// Maps --> User Address => Reward Token Address => Version => UserTransactionInfo
+    mapping(address => mapping(address => mapping(uint256 => uint256))) private userTransactionInfo;
 
     /// @dev initializing contract with AAVE v3 lending pool address and Zero Premium controller address
     /// @param _lendingAddress: AAVE v3 lending address
@@ -38,26 +38,26 @@ contract AAVE is Ownable, IAAVEImplementation {
         address _lendingAddress, 
         address _controllerAddress
     ) {
-        LendAAVE = IAAVE(_lendingAddress);
-        zpController = SmartContractZPController(_controllerAddress);
+        _lendingAAVE = IAAVE(_lendingAddress);
+        _zpController = SmartContractZPController(_controllerAddress);
     }
 
     /// @dev Initialize this function first before running any other function
     /// @dev Registers the AAVE protocol in the Zero Premium Controller protocol list
-    /// @param _protocolName: name of the protocol: AAVE
-    /// @param _deployedAddress: address of the AAVE lending pool
-    /// @param _isCommunityGoverned: checks if the protocol is community governed or not
-    /// @param _riskFactor: registers the risk score of AAVE; 0 being lowest, and 100 being highest
-    /// @param _riskPoolCategory: registers the risk pool category; 1 - low, 2-medium, and 3- high risk
+    /// @param protocolName: name of the protocol: AAVE
+    /// @param deployedAddress: address of the AAVE lending pool
+    /// @param isCommunityGoverned: checks if the protocol is community governed or not
+    /// @param riskFactor: registers the risk score of AAVE; 0 being lowest, and 100 being highest
+    /// @param riskPoolCategory: registers the risk pool category; 1 - low, 2-medium, and 3- high risk
     function addAAVEProtocolInfo(
-        string memory _protocolName,
-        address _deployedAddress,
-        bool _isCommunityGoverned,
-        uint256 _riskFactor,
-        uint256 _riskPoolCategory
+        string memory protocolName,
+        address deployedAddress,
+        bool isCommunityGoverned,
+        uint256 riskFactor,
+        uint256 riskPoolCategory
     ) external onlyOwner {
-        protocolID = zpController.protocolID();
-        zpController.addCoveredProtocol(_protocolName, _deployedAddress, _isCommunityGoverned, _riskFactor, _riskPoolCategory);
+        _protocolID = _zpController.protocolID();
+        _zpController.addCoveredProtocol(protocolName, deployedAddress, isCommunityGoverned, riskFactor, riskPoolCategory);
     } 
 
     /// @dev minting function for testnet purposes
@@ -69,64 +69,64 @@ contract AAVE is Ownable, IAAVEImplementation {
 
     error LowSupplyAmountError();
     /// @dev supply function to supply token to the AAVE v3 Pool
-    /// @param _tokenAddress: token address of the supplied token, e.g. DAI
-    /// @param _rewardTokenAddress: token address of the received token, e.g. aDAI
-    /// @param _amount: amount of the tokens supplied
-    function supplyToken(address _tokenAddress, address _rewardTokenAddress, uint256 _amount) external override {
-        if (_amount < 1e10) {
+    /// @param tokenAddress: token address of the supplied token, e.g. DAI
+    /// @param rewardTokenAddress: token address of the received token, e.g. aDAI
+    /// @param amount: amount of the tokens supplied
+    function supplyToken(address tokenAddress, address rewardTokenAddress, uint256 amount) external override {
+        if (amount < 1e10) {
             revert LowSupplyAmountError();
         }
-        IAAVEERC20(_tokenAddress).transferFrom(_msgSender(), address(this), _amount);
-        uint256 currVersion =  zpController.latestVersion();
-        uint256 balanceBeforeSupply = IAAVEERC20(_rewardTokenAddress).balanceOf(address(this));
-        IAAVEERC20(_tokenAddress).approve(address(LendAAVE), _amount);
-        LendAAVE.supply(_tokenAddress, _amount, address(this), 0);
-        uint256 balanceAfterSupply = IAAVEERC20(_rewardTokenAddress).balanceOf(address(this));
-        userTransactionInfo[_msgSender()][_rewardTokenAddress][currVersion] += (balanceAfterSupply - balanceBeforeSupply);
-        if (!usersInfo[_msgSender()][_rewardTokenAddress].isActiveInvested) {
-            usersInfo[_msgSender()][_rewardTokenAddress].startVersionBlock = currVersion;
-            usersInfo[_msgSender()][_rewardTokenAddress].isActiveInvested = true;
+        IAAVEERC20(tokenAddress).transferFrom(_msgSender(), address(this), amount);
+        uint256 currVersion =  _zpController.latestVersion();
+        uint256 balanceBeforeSupply = IAAVEERC20(rewardTokenAddress).balanceOf(address(this));
+        IAAVEERC20(tokenAddress).approve(address(_lendingAAVE), amount);
+        _lendingAAVE.supply(tokenAddress, amount, address(this), 0);
+        uint256 balanceAfterSupply = IAAVEERC20(rewardTokenAddress).balanceOf(address(this));
+        userTransactionInfo[_msgSender()][rewardTokenAddress][currVersion] += (balanceAfterSupply - balanceBeforeSupply);
+        if (!usersInfo[_msgSender()][rewardTokenAddress].isActiveInvested) {
+            usersInfo[_msgSender()][rewardTokenAddress].startVersionBlock = currVersion;
+            usersInfo[_msgSender()][rewardTokenAddress].isActiveInvested = true;
         }
     }
 
     /// @dev to withdraw the tokens from the AAVE v3 lending pool
-    /// @param _tokenAddress: token address of the supplied token, e.g. DAI
-    /// @param _rewardTokenAddress: token address of the received token, e.g. aDAI
-    /// @param _amount: amount of the tokens to be withdrawn
-    function withdrawToken(address _tokenAddress, address _rewardTokenAddress, uint256 _amount) external override {
-        uint256 userBalance = calculateUserBalance(_rewardTokenAddress);
-        if (userBalance >= _amount) {
-            IAAVEERC20(_rewardTokenAddress).approve(address(LendAAVE), _amount);
-            LendAAVE.withdraw(_tokenAddress, _amount, address(this));
-            IAAVEERC20(_tokenAddress).transfer(_msgSender(), _amount);
-            usersInfo[_msgSender()][_rewardTokenAddress].withdrawnBalance += _amount;
-            if (_amount == userBalance) {
-                usersInfo[_msgSender()][_rewardTokenAddress].isActiveInvested = false;
+    /// @param tokenAddress: token address of the supplied token, e.g. DAI
+    /// @param rewardTokenAddress: token address of the received token, e.g. aDAI
+    /// @param amount: amount of the tokens to be withdrawn
+    function withdrawToken(address tokenAddress, address rewardTokenAddress, uint256 amount) external override {
+        uint256 userBalance = calculateUserBalance(rewardTokenAddress);
+        if (userBalance >= amount) {
+            IAAVEERC20(rewardTokenAddress).approve(address(_lendingAAVE), amount);
+            _lendingAAVE.withdraw(tokenAddress, amount, address(this));
+            IAAVEERC20(tokenAddress).transfer(_msgSender(), amount);
+            usersInfo[_msgSender()][rewardTokenAddress].withdrawnBalance += amount;
+            if (amount == userBalance) {
+                usersInfo[_msgSender()][rewardTokenAddress].isActiveInvested = false;
             }
         }        
     }
     
     /// @dev calculates the user balance
-    /// @param _rewardTokenAddress: token address of the token received, e.g. aDAI
-    function calculateUserBalance(address _rewardTokenAddress) public view override returns(uint256) {
+    /// @param rewardTokenAddress: token address of the token received, e.g. aDAI
+    function calculateUserBalance(address rewardTokenAddress) public view override returns(uint256) {
         uint256 userBalance;
-        uint256 userStartVersion = usersInfo[_msgSender()][_rewardTokenAddress].startVersionBlock;
-        uint256 currVersion =  zpController.latestVersion();
+        uint256 userStartVersion = usersInfo[_msgSender()][rewardTokenAddress].startVersionBlock;
+        uint256 currVersion =  _zpController.latestVersion();
         uint256 riskPoolCategory;
         for (uint i = userStartVersion; i <= currVersion; i++) {
-            uint256 userVersionBalance = userTransactionInfo[_msgSender()][_rewardTokenAddress][i];
-            if (zpController.ifProtocolUpdated(protocolID, i)) {
-                riskPoolCategory = zpController.getProtocolRiskCategory(protocolID, i);
+            uint256 userVersionBalance = userTransactionInfo[_msgSender()][rewardTokenAddress][i];
+            if (_zpController.ifProtocolUpdated(_protocolID, i)) {
+                riskPoolCategory = _zpController.getProtocolRiskCategory(_protocolID, i);
             }
             if (userVersionBalance > 0) {
                 userBalance += userVersionBalance;
             } 
-            if (zpController.isRiskPoolLiquidated(i, riskPoolCategory)) {
-                userBalance = ((userBalance * zpController.getLiquidationFactor(i)) / 100);
+            if (_zpController.isRiskPoolLiquidated(i, riskPoolCategory)) {
+                userBalance = ((userBalance * _zpController.getLiquidationFactor(i)) / 100);
             } 
               
         }
-        userBalance -= usersInfo[_msgSender()][_rewardTokenAddress].withdrawnBalance;
+        userBalance -= usersInfo[_msgSender()][rewardTokenAddress].withdrawnBalance;
         return userBalance;
     }
 }

@@ -78,6 +78,10 @@ contract ConstantFlowAgreement is Ownable, ICFA, Pausable, ReentrancyGuard {
         startWaitingTime = timeInMinutes * 1 minutes;
     }
 
+    function updateMaxInsuredDays(uint256 timeInDays) external onlyOwner {
+        maxInsuredDays = timeInDays * 1 days;
+    }
+
     /// @param insuredAmount: insured amount
     /// @param protocolID: like AAVE which a user want cover against
     function activateInsurance(uint256 insuredAmount, uint256 protocolID) public override nonReentrant {
@@ -93,7 +97,7 @@ contract ConstantFlowAgreement is Ownable, ICFA, Pausable, ReentrancyGuard {
             revert ActiveInsuranceExistError();
         }
         uint256[] memory activeID = findActiveFlows(_msgSender(), _protocolRegistry.protocolID());
-        uint256 userEstimatedBalance = _sztDAI.balanceOf(_msgSender()) - calculateTotalFlowMade(_msgSender(), activeID);
+        uint256 userEstimatedBalance = _sztDAI.balanceOf(_msgSender()) - _calculateTotalFlowMade(_msgSender(), activeID);
         /// NOTE: StreamFlowRate will be in seconds from now
         uint256 flowRate = (_protocolRegistry.getStreamFlowRate(protocolID) * insuredAmount) / 1e18; /// in seconds
         UserGlobalInsuranceInfo storage userGlobalInsuranceInfo = usersGlobalInsuranceInfo[_msgSender()];
@@ -114,7 +118,7 @@ contract ConstantFlowAgreement is Ownable, ICFA, Pausable, ReentrancyGuard {
         userInsuranceInfo.insuranceFlowRate = flowRate;
         userInsuranceInfo.registrationTime = block.timestamp;
         userInsuranceInfo.startTime = block.timestamp + startWaitingTime;
-        userInsuranceInfo.validTill = userGlobalInsuranceInfo.validTill;
+        userInsuranceInfo.validTill = startWaitingTime + userGlobalInsuranceInfo.validTill;
         userInsuranceInfo.isValid = true;
         if (!userInsuranceInfo.gelatoCallMade) {
             userInsuranceInfo.gelatoCallMade = true;
@@ -143,9 +147,9 @@ contract ConstantFlowAgreement is Ownable, ICFA, Pausable, ReentrancyGuard {
         activateInsurance(newInsuredAmount, protocolID);
     }
 
-    function closeAllStream(address userAddress) public override returns(bool) {
+    function closeAllStream(address userAddress) external override returns(bool) {
         uint256[] memory activeID = findActiveFlows(_msgSender(), _protocolRegistry.protocolID());
-        uint256 expectedAmountToBePaid = calculateTotalFlowMade(userAddress, activeID);
+        uint256 expectedAmountToBePaid = _calculateTotalFlowMade(userAddress, activeID);
         for (uint256 i=0; i < activeID.length; i++) {
             usersInsuranceInfo[_msgSender()][activeID[i]].isValid = false;
             uint256 flowRate = usersInsuranceInfo[_msgSender()][activeID[i]].insuranceFlowRate;
@@ -183,23 +187,19 @@ contract ConstantFlowAgreement is Ownable, ICFA, Pausable, ReentrancyGuard {
             }
             return false;
         }
-        return false;
+        revert NoStreamRunningError();
     }
 
     error LowUserBalance();
     function transfer(address to, uint256 amount) public override returns(bool) {
         uint256[] memory activeID = findActiveFlows(_msgSender(), _protocolRegistry.protocolID());
-        uint256 expectedAmountToBePaid = totalAmountExpectedToBePaid(_msgSender(), activeID);
+        uint256 expectedAmountToBePaid = _totalAmountExpectedToBePaid(_msgSender(), activeID);
         uint256 userBalance = _sztDAI.balanceOf(_msgSender()); 
         if ((expectedAmountToBePaid + amount) > userBalance) {
             bool success = _sztDAI.transferFrom(_msgSender(), to, amount);
             return success;
         }
         return false;
-    }
-
-    function updateMaxInsuredDays(uint256 timeInDays) external onlyOwner {
-        maxInsuredDays = timeInDays * 1 days;
     }
 
     /// VIEW FUNCTIONS
@@ -209,7 +209,7 @@ contract ConstantFlowAgreement is Ownable, ICFA, Pausable, ReentrancyGuard {
         for (uint i = 0; i < protocolCount; i++) {
           UserInsuranceInfo memory userInsuranceInfo = usersInsuranceInfo[userAddress][i];
               if (userInsuranceInfo.isValid) {
-                activeProtocolCount++;
+                ++activeProtocolCount;
             }
         }
         
@@ -226,7 +226,7 @@ contract ConstantFlowAgreement is Ownable, ICFA, Pausable, ReentrancyGuard {
     }
 
     /// internal call for transferFrom [not for external or public calls]
-    function totalAmountExpectedToBePaid(address userAddress, uint256[] memory activeID) internal view returns(uint256) {
+    function _totalAmountExpectedToBePaid(address userAddress, uint256[] memory activeID) internal view returns(uint256) {
         uint256 balanceToBePaid;
         for (uint256 i=0; i< activeID.length; i++){
             UserInsuranceInfo storage userActiveInsuranceInfo = usersInsuranceInfo[userAddress][activeID[i]];
@@ -236,8 +236,8 @@ contract ConstantFlowAgreement is Ownable, ICFA, Pausable, ReentrancyGuard {
         return balanceToBePaid;
     }
 
-    function calculateTotalFlowMade(address userAddress, uint256[] memory activeID) internal view returns(uint256) {
-        uint256 balanceToBePaid;
+    function _calculateTotalFlowMade(address userAddress, uint256[] memory activeID) internal view returns(uint256) {
+        uint256 balanceToBePaid = 0;
         for (uint256 i=0; i< activeID.length; i++){
             UserInsuranceInfo storage userActiveInsuranceInfo = usersInsuranceInfo[userAddress][activeID[i]];
             uint256 duration = block.timestamp > userActiveInsuranceInfo.startTime ? block.timestamp - userActiveInsuranceInfo.startTime : 0;
@@ -246,8 +246,8 @@ contract ConstantFlowAgreement is Ownable, ICFA, Pausable, ReentrancyGuard {
         return balanceToBePaid;
     }
 
-    function calculateTotalFlowMade(address userAddress) public view override returns(uint256) {
-        uint256 balanceToBePaid;
+    function calculateTotalFlowMade(address userAddress) external view override returns(uint256) {
+        uint256 balanceToBePaid = 0;
         uint256[] memory activeID = findActiveFlows(userAddress, _protocolRegistry.protocolID());
         for (uint256 i=0; i< activeID.length; i++){
             UserInsuranceInfo storage userActiveInsuranceInfo = usersInsuranceInfo[userAddress][activeID[i]];

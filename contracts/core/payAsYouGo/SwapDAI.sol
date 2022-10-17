@@ -5,7 +5,7 @@ import "./../../dependencies/openzeppelin/Ownable.sol";
 import "./../../../interfaces/IERC20.sol";
 import "./../../../interfaces/IERC20Extended.sol";
 
-contract SwapDAI is Ownable{
+contract SwapDAI is Ownable {
 
     IERC20 private immutable DAI;
     IERC20Extended private immutable sztDAI;
@@ -15,15 +15,23 @@ contract SwapDAI is Ownable{
         sztDAI = IERC20Extended(_sztDAIAddress);
     }
 
+    error TransactionFailedError();
+
     function swapDAI(uint256 _amount) external returns(bool) {
         DAI.transferFrom(_msgSender(), address(this), _amount);
         bool success = sztDAI.mint(_msgSender(), _amount);
-        return success;
+        if (!success) {
+            revert TransactionFailedError();
+        }
+        return true;
     }
 
     function swapsztDAI(uint256 _amount) external returns(bool) {
         sztDAI.transferFrom(_msgSender(), address(this), _amount);
         bool success = DAI.transfer(_msgSender(), _amount);
-        return success;
+        if (!success) {
+            revert TransactionFailedError();
+        }
+        return true;
     }
 }

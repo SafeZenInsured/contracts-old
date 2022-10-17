@@ -4,13 +4,16 @@ pragma solidity 0.8.16;
 import "./../../../interfaces/IProtocolsRegistry.sol";
 import "./../../dependencies/openzeppelin/Ownable.sol";
 import "./../../../interfaces/IBuySellSZT.sol";
+import "./../../../interfaces/ICoveragePool.sol";
 
 /// Report any bug or issues at:
 /// @custom:security-contact anshik@safezen.finance
-contract ProtocolRegistry is IProtocolsRegistry, Ownable {
+contract ProtocolsRegistry is IProtocolsRegistry, Ownable {
     uint256 public override protocolID = 0;
     uint256 public override version = 0;
+    uint256 private _flowVersionID = 0;
     IBuySellSZT private buySellSZT;
+    ICoveragePool private _coveragePool;
 
     struct ProtocolInfo { 
         string protocolName;
@@ -25,14 +28,16 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
     }
 
     struct ProtocolVersionableInfo {
-        bool isUpdated;
         uint256 riskFactor;
-        bool isCommunityGoverned;
         uint256 riskPoolCategory;
-        
+        bool isUpdated;
+        bool isCommunityGoverned;
     }
 
+    enum Activity{coverageAdded, coverageRemoved, liquidityAdded, liquidityRemoved, claimAppealed}
+
     struct GlobalProtocolInfo {
+        Activity activity;
         uint256 startTime;
         uint256 endTime;
         uint256 liquidation;
@@ -41,8 +46,25 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
         uint256 globalIncomingStreamFlowRate;
     }
 
+    function calculateUnderwriterBalance(uint256 protocolID_) external view {
+        uint256[] memory activeVersionID = _coveragePool.getUnderwriterActiveVersionID(protocolID_);
+        uint256 startVersionID = activeVersionID[0];
+        uint256 premiumEarnedFlowRate = 0;
+        uint256 userPremiumEarned = 0;
+        uint256 riskPoolCategory = 0;
+        uint256 counter = 0;
+        for (uint256 i = startVersionID; i <= version; i++) {
+            if(activeVersionID[counter] == startVersionID) {
+                
+            }
+        }
+
+    } 
+
+    /// Version => LiquidationInPercent
     mapping(uint256 => uint256) public versionLiquidation;
 
+    /// ProtocolID => ProtocolInfo
     mapping (uint256 => ProtocolInfo) public ProtocolInfos;
 
     /// riskPoolCategory => version => global protocol info
@@ -51,149 +73,150 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
     // protocol ID => version => protocolVersionableInfo
     mapping(uint256 => mapping(uint256 => ProtocolVersionableInfo)) public protocolsVersionableInfo;
 
-    function setBuySellSZT(address _buySellSZTCA) external onlyOwner {
-        buySellSZT = IBuySellSZT(_buySellSZTCA);
+    function setBuySellSZT(address buySellSZTCA) external onlyOwner {
+        buySellSZT = IBuySellSZT(buySellSZTCA);
     }
 
-    function liquidatePositions(uint256 _riskPoolCategory, uint256 _liquidatedPercent) external onlyOwner {
-        GlobalProtocolsInfo[_riskPoolCategory][version].liquidation = _liquidatedPercent;
+    function liquidatePositions(uint256 riskPoolCategory, uint256 liquidatedPercent) external onlyOwner {
+        GlobalProtocolsInfo[riskPoolCategory][version].liquidation = liquidatedPercent;
         for (uint i = 0; i <= protocolID; i++) {
-            if (ProtocolInfos[i].currentRiskPoolCategory == _riskPoolCategory) {
-                ProtocolInfos[i].protocolLiquidity = ((ProtocolInfos[i].protocolLiquidity * _liquidatedPercent)/100);
+            if (ProtocolInfos[i].currentRiskPoolCategory == riskPoolCategory) {
+                ProtocolInfos[i].protocolLiquidity = ((ProtocolInfos[i].protocolLiquidity * liquidatedPercent)/100);
             }
         }
-        version ++;
+        ++version;
     }
 
-    function getLiquidationFactor(uint256 _riskPoolCategory, uint256 _version) external view override returns(uint256) {
-        return GlobalProtocolsInfo[_riskPoolCategory][_version].liquidation;
+    function updateStreamFlowRate(uint256 protocolID_, uint256 newFlowRate) external onlyOwner {
+        ProtocolInfos[protocolID_].streamFlowRate = newFlowRate;
     }
 
-    function isRiskPoolLiquidated(uint256 _version, uint256 _riskPoolCategory) external view override returns (bool) {
-        return versionLiquidation[_version] == _riskPoolCategory;
+    function _updateVersionInformation(uint256 protocolID_) internal {
+        uint256 riskPoolCategory = ProtocolInfos[protocolID_].currentRiskPoolCategory;
+        GlobalProtocolInfo storage globalProtocolInfo = GlobalProtocolsInfo[riskPoolCategory][version];
+        // globalProtocolInfo.
+
     }
 
-    function calculateRiskPoolLiquidity(uint256 _riskPoolCategory) external view override returns(uint256) {
-        uint256 riskPoolLiquidity = 0;
-        for (uint256 i = 0; i <= version; i++) {
-            GlobalProtocolInfo memory globalProtocolInfo = GlobalProtocolsInfo[i][_riskPoolCategory];
-            if (globalProtocolInfo.globalProtocolLiquidity > 0) {
-                riskPoolLiquidity += globalProtocolInfo.globalProtocolLiquidity; 
-            }
-            if (versionLiquidation[i] == _riskPoolCategory) {
-                riskPoolLiquidity = ((riskPoolLiquidity * globalProtocolInfo.liquidation)/100);
+    function claimAdded(uint256 protocolID_) external {
+        uint256 riskPoolCategory = ProtocolInfos[protocolID_].currentRiskPoolCategory;
+        GlobalProtocolsInfo[riskPoolCategory][version].endTime = block.timestamp;
+        uint256 previousIncomingFlowRate = GlobalProtocolsInfo[riskPoolCategory][version].globalIncomingStreamFlowRate;
+        uint256 previousLiquiditySupplied = GlobalProtocolsInfo[riskPoolCategory][version].globalProtocolLiquidity;
+        ++version;
+        GlobalProtocolsInfo[riskPoolCategory][version].startTime = block.timestamp;
+        GlobalProtocolsInfo[riskPoolCategory][version].globalIncomingStreamFlowRate = previousIncomingFlowRate;
+        GlobalProtocolsInfo[riskPoolCategory][version].globalProtocolLiquidity = previousLiquiditySupplied;
+    }
+
+    function _updateFlowVersionID(uint256 riskPoolCategory) internal {
+        uint256 flowVersionID = _flowVersionID;
+        for (uint256 i = _flowVersionID; i <= version; i++) {
+            if (
+                (GlobalProtocolsInfo[riskPoolCategory][i].startTime <= block.timestamp) &&
+                (GlobalProtocolsInfo[riskPoolCategory][i].activity == Activity.coverageAdded)
+            )  {
+                ++flowVersionID;
             }
         }
-        return riskPoolLiquidity;
-    }
-
-    function ifEnoughLiquidity(uint256 _insuredAmount, uint256 _protocolID) external view override returns(bool) {
-        bool isTrue=  ProtocolInfos[_protocolID].protocolLiquidity >= (ProtocolInfos[_protocolID].coverageOffered + _insuredAmount);
-        return isTrue;
-    }
-
-    function updateStreamFlowRate(uint256 _protocolID, uint256 _newFlowRate) external onlyOwner {
-        ProtocolInfos[_protocolID].streamFlowRate = _newFlowRate;
-    }
-
-    function getStreamFlowRate(uint256 _protocolID) external view override returns(uint256) {
-        return ProtocolInfos[_protocolID].streamFlowRate;
+        _flowVersionID = flowVersionID;
     }
 
     function addCoverageOffered(
-        uint256 _protocolID, 
-        uint256 _coverageAmount,
-        uint256 _incomingFlowRate
+        uint256 protocolID_, 
+        uint256 coverageAmount,
+        uint256 incomingFlowRate
     ) external override {
-        uint256 _riskPoolCategory = ProtocolInfos[_protocolID].currentRiskPoolCategory;
-        GlobalProtocolsInfo[_riskPoolCategory][version].endTime = block.timestamp > GlobalProtocolsInfo[_riskPoolCategory][version].startTime ? block.timestamp: GlobalProtocolsInfo[_riskPoolCategory][version].startTime;
-        uint256 previousIncomingFlowRate = GlobalProtocolsInfo[_riskPoolCategory][version].globalIncomingStreamFlowRate;
-        version ++;
-        ProtocolInfos[_protocolID].coverageOffered += _coverageAmount;
-        GlobalProtocolsInfo[_riskPoolCategory][version].startTime = block.timestamp;
-        GlobalProtocolsInfo[_riskPoolCategory][version].globalIncomingStreamFlowRate = previousIncomingFlowRate + _incomingFlowRate;
+        uint256 riskPoolCategory = ProtocolInfos[protocolID_].currentRiskPoolCategory;
+        GlobalProtocolsInfo[riskPoolCategory][version].endTime = block.timestamp;
+        uint256 previousIncomingFlowRate = GlobalProtocolsInfo[riskPoolCategory][version].globalIncomingStreamFlowRate;
+        ++version;
+        GlobalProtocolsInfo[riskPoolCategory][version].activity = Activity.coverageAdded;
+        ProtocolInfos[protocolID_].coverageOffered += coverageAmount;
+        GlobalProtocolsInfo[riskPoolCategory][version].startTime = block.timestamp;
+        GlobalProtocolsInfo[riskPoolCategory][version].globalIncomingStreamFlowRate = previousIncomingFlowRate + incomingFlowRate;
     }
 
     function removeCoverageOffered(
-        uint256 _protocolID, 
-        uint256 _coverageAmount, 
-        uint256 _incomingFlowRate
+        uint256 protocolID_, 
+        uint256 coverageAmount, 
+        uint256 incomingFlowRate
     ) external override returns(bool) {
-        uint256 _riskPoolCategory = ProtocolInfos[_protocolID].currentRiskPoolCategory;
-        GlobalProtocolsInfo[_riskPoolCategory][version].endTime = block.timestamp > GlobalProtocolsInfo[_riskPoolCategory][version].startTime ? block.timestamp: GlobalProtocolsInfo[_riskPoolCategory][version].startTime;
-        uint256 previousIncomingFlowRate = GlobalProtocolsInfo[_riskPoolCategory][version].globalIncomingStreamFlowRate;
-        version ++;
-        ProtocolInfos[_protocolID].coverageOffered -= _coverageAmount;
-        GlobalProtocolsInfo[_riskPoolCategory][version].startTime = block.timestamp;
-        GlobalProtocolsInfo[_riskPoolCategory][version].globalIncomingStreamFlowRate = previousIncomingFlowRate - _incomingFlowRate;
+        uint256 riskPoolCategory = ProtocolInfos[protocolID_].currentRiskPoolCategory;
+        GlobalProtocolsInfo[riskPoolCategory][version].endTime = block.timestamp > GlobalProtocolsInfo[riskPoolCategory][version].startTime ? block.timestamp: GlobalProtocolsInfo[riskPoolCategory][version].startTime;
+        uint256 previousIncomingFlowRate = GlobalProtocolsInfo[riskPoolCategory][version].globalIncomingStreamFlowRate;
+        ++version;
+        ProtocolInfos[protocolID_].coverageOffered -= coverageAmount;
+        GlobalProtocolsInfo[riskPoolCategory][version].startTime = block.timestamp;
+        GlobalProtocolsInfo[riskPoolCategory][version].globalIncomingStreamFlowRate = previousIncomingFlowRate - incomingFlowRate;
         return true;
     }
 
     function addProtocolLiquidation(
-        uint256 _protocolID, 
-        uint256 _liquiditySupplied
+        uint256 protocolID_, 
+        uint256 liquiditySupplied
     ) external override returns(bool) {
-        uint256 _riskPoolCategory = ProtocolInfos[_protocolID].currentRiskPoolCategory;
-        GlobalProtocolsInfo[_riskPoolCategory][version].endTime = block.timestamp;
-        uint256 previousLiquiditySupplied = GlobalProtocolsInfo[_riskPoolCategory][version].globalProtocolLiquidity;
-        version ++;
+        uint256 riskPoolCategory = ProtocolInfos[protocolID_].currentRiskPoolCategory;
+        GlobalProtocolsInfo[riskPoolCategory][version].endTime = block.timestamp;
+        uint256 previousLiquiditySupplied = GlobalProtocolsInfo[riskPoolCategory][version].globalProtocolLiquidity;
+        ++version;
         uint256 SZTTokenCounter = buySellSZT.getSZTTokenCount();
-        (, uint256 amountCoveredInDAI) = buySellSZT.calculateSZTPrice((SZTTokenCounter - _liquiditySupplied), SZTTokenCounter);
-        ProtocolInfos[_protocolID].protocolLiquidity += amountCoveredInDAI;
-        GlobalProtocolsInfo[_riskPoolCategory][version].startTime = block.timestamp;
-        GlobalProtocolsInfo[_riskPoolCategory][version].globalProtocolLiquidity = previousLiquiditySupplied + amountCoveredInDAI;
+        (, uint256 amountCoveredInDAI) = buySellSZT.calculateSZTPrice((SZTTokenCounter - liquiditySupplied), SZTTokenCounter);
+        ProtocolInfos[protocolID_].protocolLiquidity += amountCoveredInDAI;
+        GlobalProtocolsInfo[riskPoolCategory][version].startTime = block.timestamp;
+        GlobalProtocolsInfo[riskPoolCategory][version].globalProtocolLiquidity = previousLiquiditySupplied + amountCoveredInDAI;
         return true;
     }
 
     function removeProtocolLiquidation(
-        uint256 _protocolID, 
-        uint256 _liquiditySupplied
+        uint256 protocolID_, 
+        uint256 liquiditySupplied
     ) external override returns(bool) {
-        uint256 _riskPoolCategory = ProtocolInfos[_protocolID].currentRiskPoolCategory;
-        GlobalProtocolsInfo[_riskPoolCategory][version].endTime = block.timestamp;
-        uint256 previousLiquiditySupplied = GlobalProtocolsInfo[_riskPoolCategory][version].globalProtocolLiquidity;
-        version ++;
+        uint256 riskPoolCategory = ProtocolInfos[protocolID_].currentRiskPoolCategory;
+        GlobalProtocolsInfo[riskPoolCategory][version].endTime = block.timestamp;
+        uint256 previousLiquiditySupplied = GlobalProtocolsInfo[riskPoolCategory][version].globalProtocolLiquidity;
+        ++version;
         uint256 SZTTokenCounter = buySellSZT.getSZTTokenCount();
-        (, uint256 amountCoveredInDAI) = buySellSZT.calculateSZTPrice(SZTTokenCounter, (SZTTokenCounter +  _liquiditySupplied));
-        ProtocolInfos[_protocolID].protocolLiquidity -= amountCoveredInDAI;
-        GlobalProtocolsInfo[_riskPoolCategory][version].startTime = block.timestamp;
-        GlobalProtocolsInfo[_riskPoolCategory][version].globalProtocolLiquidity = previousLiquiditySupplied - amountCoveredInDAI;
+        (, uint256 amountCoveredInDAI) = buySellSZT.calculateSZTPrice(SZTTokenCounter, (SZTTokenCounter +  liquiditySupplied));
+        ProtocolInfos[protocolID_].protocolLiquidity -= amountCoveredInDAI;
+        GlobalProtocolsInfo[riskPoolCategory][version].startTime = block.timestamp;
+        GlobalProtocolsInfo[riskPoolCategory][version].globalProtocolLiquidity = previousLiquiditySupplied - amountCoveredInDAI;
         return true;
     }
 
-    event RequestAddNewProtocol(string indexed _protocolName, address indexed _protocolAddress);
-    function requestAddNewProtocol(string memory _protocolName, address _protocolAddress) external override {
-        emit RequestAddNewProtocol(_protocolName, _protocolAddress);
+    event RequestAddNewProtocol(string indexed protocolName, address indexed protocolAddress);
+    function requestAddNewProtocol(string memory protocolName, address protocolAddress) external override {
+        emit RequestAddNewProtocol(protocolName, protocolAddress);
     }
 
     function addProtocolInfo(
-        string memory _protocolName, 
-        address _protocolAddress,
-        uint256 _riskFactor,
-        bool _isCommunityGoverned,
-        uint256 _riskPoolCategory,
-        uint256 _streamFlowRate
+        string memory protocolName, 
+        address protocolAddress,
+        uint256 riskFactor,
+        bool isCommunityGoverned,
+        uint256 riskPoolCategory,
+        uint256 streamFlowRate
         ) external onlyOwner {
         protocolID ++;
         ProtocolInfo storage protocolInfo = ProtocolInfos[protocolID];
-        protocolInfo.protocolName = _protocolName;
-        protocolInfo.protocolAddress = _protocolAddress;
+        protocolInfo.protocolName = protocolName;
+        protocolInfo.protocolAddress = protocolAddress;
         protocolInfo.startVersionBlock = version;
         protocolInfo.protocolLiquidity = 0;
         protocolInfo.coverageOffered = 0;
-        protocolInfo.streamFlowRate = _streamFlowRate;
-        protocolInfo.currentRiskFactor =_riskFactor;
-        protocolInfo.currentRiskPoolCategory = _riskPoolCategory;
-        protocolInfo.currentlyIsCommunityGoverned = _isCommunityGoverned;
+        protocolInfo.streamFlowRate = streamFlowRate;
+        protocolInfo.currentRiskFactor =riskFactor;
+        protocolInfo.currentRiskPoolCategory = riskPoolCategory;
+        protocolInfo.currentlyIsCommunityGoverned = isCommunityGoverned;
         ProtocolVersionableInfo storage protocolVersionableInfo = protocolsVersionableInfo[protocolID][version];
         protocolVersionableInfo.isUpdated = true;
-        protocolVersionableInfo.riskFactor = _riskFactor;
-        protocolVersionableInfo.isCommunityGoverned = _isCommunityGoverned;
-        protocolVersionableInfo.riskPoolCategory = _riskPoolCategory; 
+        protocolVersionableInfo.riskFactor = riskFactor;
+        protocolVersionableInfo.isCommunityGoverned = isCommunityGoverned;
+        protocolVersionableInfo.riskPoolCategory = riskPoolCategory; 
     }
 
-    function viewProtocolInfo(uint256 _protocolID) external view returns(string memory, address, uint256, uint256, uint256) {
-        ProtocolInfo storage protocolInfo = ProtocolInfos[_protocolID];
+    function viewProtocolInfo(uint256 protocolID_) external view returns(string memory, address, uint256, uint256, uint256) {
+        ProtocolInfo storage protocolInfo = ProtocolInfos[protocolID_];
         return (protocolInfo.protocolName, 
                 protocolInfo.protocolAddress, 
                 protocolInfo.protocolLiquidity, 
@@ -202,39 +225,70 @@ contract ProtocolRegistry is IProtocolsRegistry, Ownable {
         );
     }
 
-    function updateProtocolRiskPoolCategory(uint256 _protocolID, uint256 _riskPoolCategory) external onlyOwner {
-        uint256 beforeRiskPoolCategory = ProtocolInfos[_protocolID].currentRiskPoolCategory;
+    function updateProtocolRiskPoolCategory(uint256 protocolID_, uint256 riskPoolCategory) external onlyOwner {
+        uint256 beforeRiskPoolCategory = ProtocolInfos[protocolID_].currentRiskPoolCategory;
         version ++;
-        protocolsVersionableInfo[protocolID][version].riskPoolCategory = _riskPoolCategory;
-        GlobalProtocolsInfo[_riskPoolCategory][version].globalProtocolLiquidity += ProtocolInfos[_protocolID].protocolLiquidity;
-        GlobalProtocolsInfo[beforeRiskPoolCategory][version].globalProtocolLiquidity -= ProtocolInfos[_protocolID].protocolLiquidity;
+        protocolsVersionableInfo[protocolID][version].riskPoolCategory = riskPoolCategory;
+        GlobalProtocolsInfo[riskPoolCategory][version].globalProtocolLiquidity += ProtocolInfos[protocolID_].protocolLiquidity;
+        GlobalProtocolsInfo[beforeRiskPoolCategory][version].globalProtocolLiquidity -= ProtocolInfos[protocolID_].protocolLiquidity;
         protocolsVersionableInfo[protocolID][version].isUpdated = true;
-        ProtocolInfos[_protocolID].currentRiskPoolCategory = _riskPoolCategory;
+        ProtocolInfos[protocolID_].currentRiskPoolCategory = riskPoolCategory;
     }
 
-    function ifProtocolUpdated(uint256 _protocolID, uint256 _version) external view override returns (bool) {
-        return protocolsVersionableInfo[_protocolID][_version].isUpdated;
+    function getStreamFlowRate(uint256 protocolID_) external view override returns(uint256) {
+        return ProtocolInfos[protocolID_].streamFlowRate;
     }
 
-    function getProtocolRiskCategory(uint256 _protocolID) external view override returns (uint256) {
-        return ProtocolInfos[_protocolID].currentRiskPoolCategory;
+    function ifProtocolUpdated(uint256 protocolID_, uint256 version_) external view override returns (bool) {
+        return protocolsVersionableInfo[protocolID_][version_].isUpdated;
     }
 
-    function getProtocolVersionRiskCategory(uint256 _protocolID, uint256 _version) external override view returns(uint256) {
-        return protocolsVersionableInfo[_protocolID][_version].riskPoolCategory;
+    function getProtocolRiskCategory(uint256 protocolID_) external view override returns (uint256) {
+        return ProtocolInfos[protocolID_].currentRiskPoolCategory;
     }
 
-    function getEarnedPremiumFlowRate(uint256 _riskPoolCategory, uint256 _version) external view override returns(uint256) {
-        return GlobalProtocolsInfo[_riskPoolCategory][_version].globalIncomingStreamFlowRate;
+    function getProtocolVersionRiskCategory(uint256 protocolID_, uint256 version_) external override view returns(uint256) {
+        return protocolsVersionableInfo[protocolID_][version_].riskPoolCategory;
     }
 
-    function getGlobalProtocolLiquidity(uint256 _riskPoolCategory, uint256 _version) external view override returns (uint256) {
-        return GlobalProtocolsInfo[_riskPoolCategory][_version].globalProtocolLiquidity;
+    function getEarnedPremiumFlowRate(uint256 riskPoolCategory, uint256 version_) external view override returns(uint256) {
+        return GlobalProtocolsInfo[riskPoolCategory][version_].globalIncomingStreamFlowRate;
     }
 
-    function getTimeInterval(uint256 _riskPoolCategory, uint256 _version) external view override returns(uint256) {
-        uint256 startTime = GlobalProtocolsInfo[_riskPoolCategory][_version].startTime;
-        uint256 endTime = GlobalProtocolsInfo[_riskPoolCategory][_version].endTime > 0 ? GlobalProtocolsInfo[_riskPoolCategory][_version].endTime : block.timestamp;
+    function getGlobalProtocolLiquidity(uint256 riskPoolCategory, uint256 version_) external view override returns (uint256) {
+        return GlobalProtocolsInfo[riskPoolCategory][version_].globalProtocolLiquidity;
+    }
+
+    function getTimeInterval(uint256 riskPoolCategory, uint256 version_) external view override returns(uint256) {
+        uint256 startTime = GlobalProtocolsInfo[riskPoolCategory][version_].startTime;
+        uint256 endTime = GlobalProtocolsInfo[riskPoolCategory][version_].endTime > 0 ? GlobalProtocolsInfo[riskPoolCategory][version_].endTime : block.timestamp;
         return (endTime-startTime); 
+    }
+
+    function getLiquidationFactor(uint256 riskPoolCategory, uint256 version_) external view override returns(uint256) {
+        return GlobalProtocolsInfo[riskPoolCategory][version_].liquidation;
+    }
+
+    function isRiskPoolLiquidated(uint256 version_, uint256 riskPoolCategory) external view override returns (bool) {
+        return versionLiquidation[version_] == riskPoolCategory;
+    }
+
+    function calculateRiskPoolLiquidity(uint256 riskPoolCategory) external view override returns(uint256) {
+        uint256 riskPoolLiquidity = 0;
+        for (uint256 i = 0; i <= version; i++) {
+            GlobalProtocolInfo memory globalProtocolInfo = GlobalProtocolsInfo[i][riskPoolCategory];
+            if (globalProtocolInfo.globalProtocolLiquidity > 0) {
+                riskPoolLiquidity += globalProtocolInfo.globalProtocolLiquidity; 
+            }
+            if (versionLiquidation[i] == riskPoolCategory) {
+                riskPoolLiquidity = ((riskPoolLiquidity * globalProtocolInfo.liquidation)/100);
+            }
+        }
+        return riskPoolLiquidity;
+    }
+
+    function ifEnoughLiquidity(uint256 insuredAmount, uint256 protocolID_) external view override returns(bool) {
+        bool isTrue=  ProtocolInfos[protocolID_].protocolLiquidity >= (ProtocolInfos[protocolID_].coverageOffered + insuredAmount);
+        return isTrue;
     }
 }

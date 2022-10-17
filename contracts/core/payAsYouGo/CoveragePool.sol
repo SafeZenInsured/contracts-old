@@ -140,6 +140,35 @@ contract CoveragePool is Ownable, ICoveragePool, ReentrancyGuard {
         return buySZTSuccess;
     }
 
+    function getUnderwriterActiveVersionID(
+        uint256 protocolID
+    ) external view override returns(uint256[] memory) {
+        uint256 activeCount = 0;
+        uint256 userStartVersion = usersInfo[_msgSender()][protocolID].startVersionBlock;
+        uint256 currVersion =  _protocolsRegistry.version();
+        for (uint256 i = userStartVersion; i <= currVersion; i++) {
+            if (underwritersBalance[_msgSender()][protocolID][i].depositedAmount > 0) {
+                ++activeCount;
+            }
+            if (underwritersBalance[_msgSender()][protocolID][i].withdrawnAmount > 0) {
+                ++activeCount;
+            }
+        }
+        uint256[] memory activeVersionID = new uint256[](activeCount);
+        uint256 counter = 0;
+        for (uint i = userStartVersion; i <= currVersion; i++) {
+            BalanceInfo storage underwriterBalanceInfo = underwritersBalance[_msgSender()][protocolID][i];
+            if (underwriterBalanceInfo.depositedAmount > 0) {
+                activeVersionID[counter] = i;
+            }
+            if (underwriterBalanceInfo.withdrawnAmount > 0) {
+                activeVersionID[counter] = i;
+            }
+            ++counter;
+        }
+        return activeVersionID;
+    } 
+
     function calculateUserBalance(uint256 protocolID) public view override returns(uint256) {
         uint256 userBalance = 0;
         uint256 userStartVersion = usersInfo[_msgSender()][protocolID].startVersionBlock;

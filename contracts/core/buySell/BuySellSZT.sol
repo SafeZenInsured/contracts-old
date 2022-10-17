@@ -92,7 +92,7 @@ contract BuySellSZT is Ownable, IBuySellSZT, Pausable, ReentrancyGuard {
         _tokenCounter += value;
         bool transferSuccess_tokenDAI = _tokenDAI.transferFrom(_msgSender(), address(this), amountToBePaid);
         bool transferSuccessSZT = _safezenToken.transfer(_msgSender(), value);
-        bool mintSuccessGSZT = mintGSZT(_msgSender());
+        bool mintSuccessGSZT = _mintGSZT(_msgSender());
         if ((!transferSuccess_tokenDAI) || (!transferSuccessSZT) || (!mintSuccessGSZT)) {
             revert TransactionFailedError();
         }
@@ -114,7 +114,7 @@ contract BuySellSZT is Ownable, IBuySellSZT, Pausable, ReentrancyGuard {
         _tokenCounter -= value;
         bool transferSuccessSZT = _safezenToken.transferFrom(_msgSender(), address(this), value);
         bool burnSuccessGSZT = _safezenGovernanceToken.burnFrom(
-            _msgSender(), burnGSZTToken(_msgSender())
+            _msgSender(), _burnGSZTToken(_msgSender())
         );
         bool _tokenDAITransferSuccess = _tokenDAI.transfer(_msgSender(), amountToBeReleased);
         if ((!_tokenDAITransferSuccess) || (!burnSuccessGSZT) || (!transferSuccessSZT)) {
@@ -131,7 +131,7 @@ contract BuySellSZT is Ownable, IBuySellSZT, Pausable, ReentrancyGuard {
         address investorAddress, 
         uint256 equivalentSZTTokens
     ) external onlyOwner returns(bool) {
-        uint256 toMintGSZT = calculateGSZTTokenCount(equivalentSZTTokens);
+        uint256 toMintGSZT = _calculateGSZTTokenCount(equivalentSZTTokens);
         bool success = _safezenGovernanceToken.mint(investorAddress, toMintGSZT);
         if (!success) {
             revert TransactionFailedError();
@@ -159,10 +159,10 @@ contract BuySellSZT is Ownable, IBuySellSZT, Pausable, ReentrancyGuard {
 
     /// @dev minting the GSZT tokens to the provided user address
     /// @param userAddress: user address
-    function mintGSZT(address userAddress) internal returns(bool) {
+    function _mintGSZT(address userAddress) internal returns(bool) {
         uint256 userSZTBalance = _safezenToken.balanceOf(userAddress);
         uint256 amountStaked = _staking.getUserStakedSZTBalance() + _coveragePool.getUnderwriteSZTBalance();
-        uint256 tokenCountGSZT = calculateGSZTTokenCount(userSZTBalance + amountStaked);
+        uint256 tokenCountGSZT = _calculateGSZTTokenCount(userSZTBalance + amountStaked);
         tokenCountGSZT = (tokenCountGSZT > (22750 * 1e18)) ? (userSZTBalance / 2) : tokenCountGSZT;
         uint256 userGSZTBalance = _safezenGovernanceToken.balanceOf(userAddress);
         uint256 toMint = tokenCountGSZT - userGSZTBalance;
@@ -202,7 +202,7 @@ contract BuySellSZT is Ownable, IBuySellSZT, Pausable, ReentrancyGuard {
     /// @param issuedSZTTokens: amount of SZT tokens currently in circulation
     /// @param alpha: alpha value for the calculation of GSZT token
     /// @param decimals: to calculate the actual alpha value for GSZT tokens 
-    function calculateGSZTCommonRatio(
+    function _calculateGSZTCommonRatio(
         uint256 issuedSZTTokens, 
         uint256 alpha, 
         uint256 decimals
@@ -215,10 +215,10 @@ contract BuySellSZT is Ownable, IBuySellSZT, Pausable, ReentrancyGuard {
 
     /// @dev Burning the GSZT token
     /// @param userAddress: wallet address of the user
-    function burnGSZTToken(address userAddress) internal view returns(uint256) {
+    function _burnGSZTToken(address userAddress) internal view returns(uint256) {
         uint256 userSZTBalance = _safezenToken.balanceOf(userAddress);
         uint256 amountStaked = _staking.getUserStakedSZTBalance() + _coveragePool.getUnderwriteSZTBalance();
-        uint256 GSZTAmountToHave = calculateGSZTTokenCount(userSZTBalance + amountStaked);
+        uint256 GSZTAmountToHave = _calculateGSZTTokenCount(userSZTBalance + amountStaked);
         uint256 GSZTAmountUserHave = _safezenGovernanceToken.balanceOf(userAddress);
         uint256 amountToBeBurned = GSZTAmountUserHave - GSZTAmountToHave;
         return amountToBeBurned;
@@ -226,15 +226,15 @@ contract BuySellSZT is Ownable, IBuySellSZT, Pausable, ReentrancyGuard {
 
     /// @dev calculating the GSZT token to be awarded to user based on the amount of SZT token user have
     /// @param issuedSZTTokens: amount of issued SZT tokens to user    
-    function calculateGSZTTokenCount(
+    function _calculateGSZTTokenCount(
         uint256 issuedSZTTokens
     ) internal pure returns(uint256) {
         uint256 commonRatioA = (
             (SZT_BASE_PRICE * 1e36) / 
-            calculateGSZTCommonRatio(issuedSZTTokens, 17, 2)
+            _calculateGSZTCommonRatio(issuedSZTTokens, 17, 2)
         );
         uint256 commonRatioB = (
-            (calculateGSZTCommonRatio(issuedSZTTokens, 22, 6) / 
+            (_calculateGSZTCommonRatio(issuedSZTTokens, 22, 6) / 
             (SZT_BASE_PRICE)) - (1e18)
         );
         uint256 GSZTTokenCount = ((commonRatioA + commonRatioB) * issuedSZTTokens) / 1e18;

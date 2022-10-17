@@ -71,7 +71,7 @@ contract TerminateInsurance is OpsReady, Ownable, Pausable {
         address userAddress, 
         uint256 protocolID
     ) external onlyOps whenNotPaused payable returns(bool) {
-        bool success = stopSpecificProtocolCFAFlow(userAddress, protocolID);
+        bool success = _stopSpecificProtocolCFAFlow(userAddress, protocolID);
         if (!success) {
             revert StopCFAFlowCallFailedError();
         }
@@ -80,7 +80,7 @@ contract TerminateInsurance is OpsReady, Ownable, Pausable {
         return true;
     }
 
-    function stopSpecificProtocolCFAFlow(
+    function _stopSpecificProtocolCFAFlow(
         address userAddress, 
         uint256 protocolID
     ) internal returns(bool) {
